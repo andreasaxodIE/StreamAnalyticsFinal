@@ -21,14 +21,14 @@ sys.path.insert(0, REPO_ROOT)
 SCHEMA_DIR = os.path.join(REPO_ROOT, "schemas")
 
 try:
-    from settings.eventhub_config import (
+    from config.eventhub_config import (
         SPARK_KAFKA_CONFIG,
         ORDERS_TOPIC,
         COURIERS_TOPIC,
     )
 except ImportError:
-    print("ERROR: settings/eventhub_config.py not found.")
-    print("  Copy the template:  cp settings/eventhub_config_template.py settings/eventhub_config.py")
+    print("ERROR: config/eventhub_config.py not found.")
+    print("  Copy the template:  cp config/eventhub_config_template.py config/eventhub_config.py")
     print("  Then fill in your Azure Event Hub connection string.")
     sys.exit(1)
 
@@ -57,7 +57,20 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
         - Java 17+ installed (JAVA_HOME set)
         - pip install pyspark
     """
+    import platform
     from pyspark.sql import SparkSession
+
+    # Fix for Windows: set HADOOP_HOME if not set
+    if platform.system() == "Windows":
+        hadoop_home = os.environ.get("HADOOP_HOME", "C:\\hadoop")
+        os.environ["HADOOP_HOME"] = hadoop_home
+        # Create dir + dummy winutils if missing
+        winutils_path = os.path.join(hadoop_home, "bin", "winutils.exe")
+        if not os.path.exists(winutils_path):
+            os.makedirs(os.path.join(hadoop_home, "bin"), exist_ok=True)
+            # Create a minimal placeholder
+            with open(winutils_path, "w") as f:
+                f.write("")
 
     # JARs for Kafka + AVRO support (downloaded automatically by Maven)
     jar_packages = ",".join([
@@ -65,15 +78,24 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
         "org.apache.spark:spark-avro_2.13:4.0.0",
     ])
 
-    spark = (
+    builder = (
         SparkSession.builder
         .appName(app_name)
         .master("local[*]")
         .config("spark.streaming.stopGracefullyOnShutdown", "true")
         .config("spark.jars.packages", jar_packages)
         .config("spark.sql.shuffle.partitions", "4")
-        .getOrCreate()
     )
+
+    # Windows: disable native IO to avoid winutils errors
+    if platform.system() == "Windows":
+        builder = builder.config("spark.sql.warehouse.dir", os.path.join(REPO_ROOT, "spark-warehouse"))
+
+    spark = builder.getOrCreate()
+
+    # Disable native Hadoop IO on Windows
+    if platform.system() == "Windows":
+        spark.sparkContext._jsc.hadoopConfiguration().set("io.native.lib.available", "false")
 
     # Reduce noisy Spark logs
     spark.sparkContext.setLogLevel("WARN")
