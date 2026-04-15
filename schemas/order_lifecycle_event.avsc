@@ -82,14 +82,18 @@
     },
     {
       "name": "event_timestamp",
-      "type": "long",
-      "logicalType": "timestamp-millis",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
       "doc": "Event time: when this status transition actually occurred, in epoch milliseconds. Primary field for event-time windowing and watermarking."
     },
     {
       "name": "ingestion_timestamp",
-      "type": "long",
-      "logicalType": "timestamp-millis",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
       "doc": "Processing time: when the event entered the message broker. Skew between event_timestamp and ingestion_timestamp indicates late data."
     },
     {
