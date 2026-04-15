@@ -18,7 +18,7 @@ from spark_session import (
     deserialize_couriers,
 )
 from pyspark.sql.functions import (
-    col, window, countDistinct,
+    col, window, approx_count_distinct,
 )
 
 
@@ -45,7 +45,7 @@ def main():
             col("zone_id"),
         )
         .agg(
-            countDistinct("courier_id").alias("idle_couriers"),
+            approx_count_distinct("courier_id").alias("idle_couriers"),
         )
         .select(
             col("window.start").alias("window_start"),
