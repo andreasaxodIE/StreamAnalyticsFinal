@@ -23,7 +23,7 @@ from spark_session import (
     deserialize_orders, deserialize_couriers,
 )
 from pyspark.sql.functions import (
-    col, window, count, countDistinct, round as _round, when,
+    col, window, count, approx_count_distinct, round as _round, when,
 )
 
 
@@ -63,7 +63,7 @@ def main():
             window(col("event_timestamp"), "5 minutes"),
             col("zone_id"),
         )
-        .agg(countDistinct("courier_id").alias("supply_couriers"))
+        .agg(approx_count_distinct("courier_id").alias("supply_couriers"))
     )
 
     # -----------------------------------------------------------------------
