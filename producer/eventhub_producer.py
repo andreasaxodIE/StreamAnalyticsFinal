@@ -29,7 +29,6 @@ from datetime import datetime, timezone, timedelta
 # ---------------------------------------------------------------------------
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
-sys.path.insert(0, os.path.join(REPO_ROOT, "generator"))
 
 from generator.config import GeneratorConfig
 from generator.order_generator import OrderEventGenerator
