@@ -21,7 +21,7 @@ sys.path.insert(0, REPO_ROOT)
 SCHEMA_DIR = os.path.join(REPO_ROOT, "schemas")
 
 try:
-    from config.eventhub_config import (
+    from settings.eventhub_config import (
         SPARK_KAFKA_CONFIG,
         ORDERS_TOPIC,
         COURIERS_TOPIC,
