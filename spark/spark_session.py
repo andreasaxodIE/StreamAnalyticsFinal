@@ -21,14 +21,14 @@ sys.path.insert(0, REPO_ROOT)
 SCHEMA_DIR = os.path.join(REPO_ROOT, "schemas")
 
 try:
-    from config.eventhub_config import (
+    from settings.eventhub_config import (
         SPARK_KAFKA_CONFIG,
         ORDERS_TOPIC,
         COURIERS_TOPIC,
     )
 except ImportError:
-    print("ERROR: config/eventhub_config.py not found.")
-    print("  Copy the template:  cp config/eventhub_config_template.py config/eventhub_config.py")
+    print("ERROR: settings/eventhub_config.py not found.")
+    print("  Copy the template:  cp settings/eventhub_config_template.py settings/eventhub_config.py")
     print("  Then fill in your Azure Event Hub connection string.")
     sys.exit(1)
 
