@@ -27,7 +27,7 @@ COURIERS_TOPIC = "group_09_couriers"
 #   Endpoint=sb://iesstsabbadbaa-grp-06-10.servicebus.windows.net/;
 #   SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=xxxxx
 # ---------------------------------------------------------------------------
-EVENTHUB_CONNECTION_STR = "YOUR_CONNECTION_STRING_HERE"
+EVENTHUB_CONNECTION_STR = "Endpoint=sb://iesstsabbadbaa-grp-06-10.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=2GZJc3vlo2ksPr+vu44pSrbhOeCkQR0Vc+AEhM+iPn4="
 
 # ---------------------------------------------------------------------------
 # Kafka-compatible bootstrap server (derived — don't change)
