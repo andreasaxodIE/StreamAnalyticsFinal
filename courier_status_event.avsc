@@ -1,0 +1,181 @@
+{
+  "type": "record",
+  "name": "CourierStatusEvent",
+  "namespace": "com.fooddelivery.streams.v1",
+  "doc": "High-frequency stream of courier GPS positions and availability state changes. Emitted at regular intervals when online and on every status change. Enables real-time courier tracking, supply/demand balancing, and ETA computation.",
+  "fields": [
+    {
+      "name": "schema_version",
+      "type": "string",
+      "default": "1.1.0",
+      "doc": "Schema version for compatibility tracking."
+    },
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique UUID for this event. Enables deduplication in stream processors."
+    },
+    {
+      "name": "courier_id",
+      "type": "string",
+      "doc": "Unique courier identifier. Primary join key with order_lifecycle_event and courier reference table."
+    },
+    {
+      "name": "order_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Active order ID if courier is currently on a delivery. Null if IDLE or OFFLINE. Join key to order feed."
+    },
+    {
+      "name": "zone_id",
+      "type": "string",
+      "doc": "Current geographic zone. May differ from order's zone_id during cross-zone deliveries."
+    },
+    {
+      "name": "courier_status",
+      "type": {
+        "type": "enum",
+        "name": "CourierStatus",
+        "symbols": [
+          "ONLINE_IDLE",
+          "HEADING_TO_RESTAURANT",
+          "WAITING_AT_RESTAURANT",
+          "PICKED_UP",
+          "EN_ROUTE_TO_CUSTOMER",
+          "DELIVERED",
+          "OFFLINE",
+          "BREAK"
+        ],
+        "doc": "Courier operational state. High-cardinality transitions expected between ONLINE_IDLE and delivery states."
+      }
+    },
+    {
+      "name": "previous_status",
+      "type": ["null", {
+        "type": "enum",
+        "name": "PreviousCourierStatus",
+        "symbols": [
+          "ONLINE_IDLE",
+          "HEADING_TO_RESTAURANT",
+          "WAITING_AT_RESTAURANT",
+          "PICKED_UP",
+          "EN_ROUTE_TO_CUSTOMER",
+          "DELIVERED",
+          "OFFLINE",
+          "BREAK"
+        ]
+      }],
+      "default": null,
+      "doc": "Previous courier status. Null for first event. Enables transition-rate analytics."
+    },
+    {
+      "name": "event_timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Event time in epoch milliseconds. Primary watermark field. GPS pings emit every ~15 seconds when active."
+    },
+    {
+      "name": "ingestion_timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Broker ingestion time. Delta vs event_timestamp used to detect network delays or device clock skew."
+    },
+    {
+      "name": "latitude",
+      "type": "double",
+      "doc": "WGS84 latitude of courier's current position."
+    },
+    {
+      "name": "longitude",
+      "type": "double",
+      "doc": "WGS84 longitude of courier's current position."
+    },
+    {
+      "name": "location_accuracy_meters",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "GPS accuracy radius in meters. High values indicate poor signal; useful for filtering unreliable pings."
+    },
+    {
+      "name": "heading_degrees",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "Compass heading in degrees (0-360). North=0. Null when stationary."
+    },
+    {
+      "name": "vehicle_type",
+      "type": {
+        "type": "enum",
+        "name": "VehicleType",
+        "symbols": ["BICYCLE", "SCOOTER", "MOTORCYCLE", "CAR", "FOOT"]
+      },
+      "doc": "Courier's transportation mode. Affects ETA calculations and zone eligibility."
+    },
+    {
+      "name": "distance_to_restaurant_meters",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Estimated road distance to the pickup restaurant. Populated when status is HEADING_TO_RESTAURANT."
+    },
+    {
+      "name": "distance_to_customer_meters",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Estimated road distance to delivery address. Populated during EN_ROUTE_TO_CUSTOMER."
+    },
+    {
+      "name": "session_id",
+      "type": "string",
+      "doc": "Courier's active work session ID. Resets each time courier comes ONLINE. Links events in a shift."
+    },
+    {
+      "name": "shift_duration_seconds",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Seconds elapsed since session start. Useful for SLA monitoring."
+    },
+    {
+      "name": "deliveries_completed_in_session",
+      "type": "int",
+      "default": 0,
+      "doc": "Number of deliveries completed in current session. Resets with session_id."
+    },
+    {
+      "name": "is_duplicate",
+      "type": "boolean",
+      "default": false,
+      "doc": "Marks intentionally duplicated events for testing deduplication pipelines."
+    },
+    {
+      "name": "is_late_arrival",
+      "type": "boolean",
+      "default": false,
+      "doc": "Marks events injected with artificial delay to simulate late-arriving GPS pings."
+    },
+    {
+      "name": "anomaly_flag",
+      "type": ["null", {
+        "type": "enum",
+        "name": "AnomalyFlag",
+        "symbols": [
+          "IMPOSSIBLE_SPEED",
+          "LOCATION_JUMP",
+          "OFFLINE_MID_DELIVERY",
+          "CLOCK_SKEW",
+          "DUPLICATE_PING"
+        ]
+      }],
+      "default": null,
+      "doc": "Generator-injected anomaly label. Null for normal events. Used to validate anomaly detection logic downstream."
+    },
+    {
+      "name": "metadata",
+      "type": ["null", {
+        "type": "map",
+        "values": "string"
+      }],
+      "default": null,
+      "doc": "Extensible key-value bag for future fields."
+    }
+  ]
+}

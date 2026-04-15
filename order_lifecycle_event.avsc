@@ -1,0 +1,205 @@
+{
+  "type": "record",
+  "name": "OrderLifecycleEvent",
+  "namespace": "com.fooddelivery.streams.v1",
+  "doc": "Represents a single state transition in the lifecycle of a food delivery order. One event is emitted per status change. Supports event-time processing via event_timestamp and ingestion_timestamp.",
+  "fields": [
+    {
+      "name": "schema_version",
+      "type": "string",
+      "default": "1.1.0",
+      "doc": "Schema version for forward/backward compatibility tracking."
+    },
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Globally unique UUID for this event. Used for deduplication in exactly-once processing."
+    },
+    {
+      "name": "order_id",
+      "type": "string",
+      "doc": "Unique identifier for the order. Join key across feeds and reference tables."
+    },
+    {
+      "name": "customer_id",
+      "type": "string",
+      "doc": "Identifier of the customer who placed the order."
+    },
+    {
+      "name": "restaurant_id",
+      "type": "string",
+      "doc": "Identifier of the fulfilling restaurant. Foreign key to restaurant reference table."
+    },
+    {
+      "name": "courier_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Identifier of the assigned courier. Null until a courier is assigned (post-ACCEPTED status)."
+    },
+    {
+      "name": "zone_id",
+      "type": "string",
+      "doc": "Geographic delivery zone identifier. Used for zone-level aggregations and skew modeling."
+    },
+    {
+      "name": "order_status",
+      "type": {
+        "type": "enum",
+        "name": "OrderStatus",
+        "symbols": [
+          "PLACED",
+          "ACCEPTED",
+          "PREPARING",
+          "READY_FOR_PICKUP",
+          "PICKED_UP",
+          "EN_ROUTE",
+          "DELIVERED",
+          "CANCELLED",
+          "FAILED"
+        ],
+        "doc": "Enumerated lifecycle states. FAILED covers platform-side errors; CANCELLED covers user/restaurant cancellations."
+      }
+    },
+    {
+      "name": "previous_status",
+      "type": ["null", {
+        "type": "enum",
+        "name": "PreviousOrderStatus",
+        "symbols": [
+          "PLACED",
+          "ACCEPTED",
+          "PREPARING",
+          "READY_FOR_PICKUP",
+          "PICKED_UP",
+          "EN_ROUTE",
+          "DELIVERED",
+          "CANCELLED",
+          "FAILED"
+        ]
+      }],
+      "default": null,
+      "doc": "The status before this transition. Null for PLACED (initial event). Enables state-machine validation."
+    },
+    {
+      "name": "event_timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Event time: when this status transition actually occurred, in epoch milliseconds. Primary field for event-time windowing and watermarking."
+    },
+    {
+      "name": "ingestion_timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Processing time: when the event entered the message broker. Skew between event_timestamp and ingestion_timestamp indicates late data."
+    },
+    {
+      "name": "order_items",
+      "type": ["null", {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "OrderItem",
+          "fields": [
+            {"name": "item_id", "type": "string"},
+            {"name": "item_name", "type": "string"},
+            {"name": "quantity", "type": "int"},
+            {"name": "unit_price_cents", "type": "int"}
+          ]
+        }
+      }],
+      "default": null,
+      "doc": "Line items. Populated only on PLACED event to avoid redundancy in subsequent events."
+    },
+    {
+      "name": "order_total_cents",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Total order value in cents (avoiding floating-point). Populated on PLACED event."
+    },
+    {
+      "name": "estimated_prep_time_seconds",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Restaurant's estimated meal preparation time in seconds. Inflated during peak hours to reflect higher kitchen load."
+    },
+    {
+      "name": "estimated_delivery_time_seconds",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Platform ETA for full delivery from order placement. Inflated during rain/snow to reflect traffic delays."
+    },
+    {
+      "name": "actual_prep_time_seconds",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Actual prep duration in seconds. Populated on READY_FOR_PICKUP. Enables prep accuracy analytics."
+    },
+    {
+      "name": "actual_delivery_time_seconds",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Actual end-to-end delivery time from placement to DELIVERED in seconds. Populated on DELIVERED event."
+    },
+    {
+      "name": "is_peak_hour",
+      "type": "boolean",
+      "default": false,
+      "doc": "True if the order was placed during lunch (12:00-14:00) or dinner (19:00-21:00) peak hours. Restaurants have longer prep times during these windows due to higher order volume."
+    },
+    {
+      "name": "weather_condition",
+      "type": {
+        "type": "enum",
+        "name": "WeatherCondition",
+        "symbols": ["CLEAR", "RAIN", "HEAVY_RAIN", "SNOW"],
+        "doc": "City-wide weather at order placement time. RAIN and SNOW inflate estimated_delivery_time_seconds to model traffic delays."
+      }
+    },
+    {
+      "name": "cancellation_reason",
+      "type": ["null", {
+        "type": "enum",
+        "name": "CancellationReason",
+        "symbols": [
+          "CUSTOMER_REQUEST",
+          "RESTAURANT_CLOSED",
+          "RESTAURANT_REJECTED",
+          "NO_COURIER_AVAILABLE",
+          "PAYMENT_FAILED",
+          "ITEM_UNAVAILABLE",
+          "FRAUD_DETECTED",
+          "SYSTEM_ERROR"
+        ]
+      }],
+      "default": null,
+      "doc": "Reason for cancellation or failure. Null for non-terminal or non-cancellation events."
+    },
+    {
+      "name": "customer_rating",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "Post-delivery customer rating (1.0-5.0). Populated only when a rating event follows DELIVERED."
+    },
+    {
+      "name": "is_duplicate",
+      "type": "boolean",
+      "default": false,
+      "doc": "Flag set by generator to mark intentionally duplicated events. Used to validate deduplication logic."
+    },
+    {
+      "name": "is_late_arrival",
+      "type": "boolean",
+      "default": false,
+      "doc": "Flag set by generator when event_timestamp is significantly behind ingestion_timestamp, simulating late data."
+    },
+    {
+      "name": "metadata",
+      "type": ["null", {
+        "type": "map",
+        "values": "string"
+      }],
+      "default": null,
+      "doc": "Extensible key-value metadata for future fields without schema evolution."
+    }
+  ]
+}
