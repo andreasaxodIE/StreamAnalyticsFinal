@@ -1,0 +1,16 @@
+# Secrets — never commit connection strings
+config/eventhub_config.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Spark
+checkpoint/
+spark-warehouse/
+output/
+*.log
+
+# OS
+.DS_Store
