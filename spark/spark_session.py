@@ -103,7 +103,7 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
 def _kafka_read_config(topic: str) -> dict:
     conf = dict(SPARK_KAFKA_CONFIG)
     conf["subscribe"] = topic
-    conf["startingOffsets"] = "latest"
+    conf["startingOffsets"] = "earliest"   # ← THIS LINE
     conf["groupIdPrefix"] = f"spark-group09-{topic}"
     return conf
 
