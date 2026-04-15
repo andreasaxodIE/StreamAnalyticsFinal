@@ -7,3 +7,6 @@ fastavro>=1.9.0
 
 # Spark: structured streaming consumer + analytics
 pyspark>=4.0.0
+
+# Dashboard: real-time visualization
+streamlit>=1.30.0
