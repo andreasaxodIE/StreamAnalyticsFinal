@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # ---------------------------------------------------------------------------
-# Path setup — allow importing from generator/ and config/
+# Path setup — allow importing from generator/ and settings/
 # ---------------------------------------------------------------------------
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
@@ -35,14 +35,14 @@ from generator.order_generator import OrderEventGenerator
 from generator.courier_generator import CourierFleetGenerator
 
 try:
-    from config.eventhub_config import (
+    from settings.eventhub_config import (
         KAFKA_SASL_CONFIG,
         ORDERS_TOPIC,
         COURIERS_TOPIC,
     )
 except ImportError:
-    print("ERROR: config/eventhub_config.py not found.")
-    print("  Copy the template:  cp config/eventhub_config_template.py config/eventhub_config.py")
+    print("ERROR: settings/eventhub_config.py not found.")
+    print("  Copy the template:  cp settings/eventhub_config_template.py settings/eventhub_config.py")
     print("  Then fill in your Azure Event Hub connection string.")
     sys.exit(1)
 
@@ -83,9 +83,6 @@ def delivery_callback(err, msg):
     """Called once per message to confirm delivery or report errors."""
     if err is not None:
         print(f"  ✗ Delivery failed: {err}")
-    # Uncomment for verbose per-message logging:
-    # else:
-    #     print(f"  ✓ {msg.topic()} [{msg.partition()}] @ {msg.offset()}")
 
 
 # ---------------------------------------------------------------------------
