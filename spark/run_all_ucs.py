@@ -24,8 +24,9 @@ from spark_session import (
     deserialize_orders, deserialize_couriers,
 )
 from pyspark.sql.functions import (
-    col, window, count, countDistinct, avg, min as _min, max as _max,
+    col, window, count, avg, min as _min, max as _max,
     sum as _sum, round as _round, when, expr, percentile_approx,
+    approx_count_distinct,
 )
 
 # ---------------------------------------------------------------------------
@@ -168,7 +169,7 @@ def main():
         .filter(col("courier_status") == "ONLINE_IDLE")
         .withWatermark("event_timestamp", "1 minute")
         .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
-        .agg(countDistinct("courier_id").alias("idle_couriers"))
+        .agg(approx_count_distinct("courier_id").alias("idle_couriers"))
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
@@ -233,7 +234,7 @@ def main():
         .filter(col("courier_status") == "ONLINE_IDLE")
         .withWatermark("event_timestamp", "2 minutes")
         .groupBy(window(col("event_timestamp"), "5 minutes"), col("zone_id"))
-        .agg(countDistinct("courier_id").alias("supply_couriers"))
+        .agg(approx_count_distinct("courier_id").alias("supply_couriers"))
     )
     uc9 = (
         demand.join(supply, on=["window", "zone_id"], how="inner")
