@@ -25,15 +25,12 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # ---------------------------------------------------------------------------
-# Path setup — allow importing from generator/ and settings/
+# Path setup — allow importing from settings/ and generator/
 # ---------------------------------------------------------------------------
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
-from generator.config import GeneratorConfig
-from generator.order_generator import OrderEventGenerator
-from generator.courier_generator import CourierFleetGenerator
-
+# Import settings FIRST (before adding generator/ to path)
 try:
     from settings.eventhub_config import (
         KAFKA_SASL_CONFIG,
@@ -45,6 +42,13 @@ except ImportError:
     print("  Copy the template:  cp settings/eventhub_config_template.py settings/eventhub_config.py")
     print("  Then fill in your Azure Event Hub connection string.")
     sys.exit(1)
+
+# Now add generator/ to path so generator's internal 'from config import ...' works
+sys.path.insert(0, os.path.join(REPO_ROOT, "generator"))
+
+from generator.config import GeneratorConfig
+from generator.order_generator import OrderEventGenerator
+from generator.courier_generator import CourierFleetGenerator
 
 import fastavro
 from confluent_kafka import Producer
