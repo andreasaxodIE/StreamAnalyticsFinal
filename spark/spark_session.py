@@ -131,77 +131,36 @@ def read_couriers_stream(spark):
 # ---------------------------------------------------------------------------
 # AVRO deserialization helpers
 # ---------------------------------------------------------------------------
-def deserialize_orders(df):
-    from pyspark.sql.avro.functions import from_avro
-    from pyspark.sql.functions import col
-
-    decoded = df.select(from_avro(col("value"), ORDER_AVRO_SCHEMA).alias("order"))
-
-    flattened = decoded.select(
-        col("order.event_id"),
-        col("order.order_id"),
-        col("order.customer_id"),
-        col("order.restaurant_id"),
-        col("order.courier_id"),
-        col("order.zone_id"),
-        col("order.order_status"),
-        col("order.previous_status"),
-        col("order.event_timestamp").alias("event_timestamp_ms"),
-        col("order.ingestion_timestamp").alias("ingestion_timestamp_ms"),
-        col("order.order_total_cents"),
-        col("order.estimated_prep_time_seconds"),
-        col("order.estimated_delivery_time_seconds"),
-        col("order.actual_prep_time_seconds"),
-        col("order.actual_delivery_time_seconds"),
-        col("order.is_peak_hour"),
-        col("order.weather_condition"),
-        col("order.cancellation_reason"),
-        col("order.customer_rating"),
-        col("order.is_duplicate"),
-        col("order.is_late_arrival"),
-    )
-
-    result = (
-        flattened
-        .withColumn("event_timestamp", (col("event_timestamp_ms") / 1000).cast("timestamp"))
-        .withColumn("ingestion_timestamp", (col("ingestion_timestamp_ms") / 1000).cast("timestamp"))
-    )
-    return result
-
-
 def deserialize_couriers(df):
     from pyspark.sql.avro.functions import from_avro
     from pyspark.sql.functions import col
 
-    decoded = df.select(from_avro(col("value"), COURIER_AVRO_SCHEMA).alias("courier"))
-
-    flattened = decoded.select(
-        col("courier.event_id"),
-        col("courier.courier_id"),
-        col("courier.order_id"),
-        col("courier.zone_id"),
-        col("courier.courier_status"),
-        col("courier.previous_status"),
-        col("courier.event_timestamp").alias("event_timestamp_ms"),
-        col("courier.ingestion_timestamp").alias("ingestion_timestamp_ms"),
-        col("courier.latitude"),
-        col("courier.longitude"),
-        col("courier.location_accuracy_meters"),
-        col("courier.heading_degrees"),
-        col("courier.vehicle_type"),
-        col("courier.distance_to_restaurant_meters"),
-        col("courier.distance_to_customer_meters"),
-        col("courier.session_id"),
-        col("courier.shift_duration_seconds"),
-        col("courier.deliveries_completed_in_session"),
-        col("courier.is_duplicate"),
-        col("courier.is_late_arrival"),
-        col("courier.anomaly_flag"),
+    decoded = df.select(
+        from_avro(col("value"), COURIER_AVRO_SCHEMA).alias("courier")
     )
 
-    result = (
-        flattened
-        .withColumn("event_timestamp", (col("event_timestamp_ms") / 1000).cast("timestamp"))
-        .withColumn("ingestion_timestamp", (col("ingestion_timestamp_ms") / 1000).cast("timestamp"))
+    result = decoded.select(
+        col("courier.event_id").alias("event_id"),
+        col("courier.courier_id").alias("courier_id"),
+        col("courier.order_id").alias("order_id"),
+        col("courier.zone_id").alias("zone_id"),
+        col("courier.courier_status").alias("courier_status"),
+        col("courier.previous_status").alias("previous_status"),
+        col("courier.event_timestamp").alias("event_timestamp"),
+        col("courier.ingestion_timestamp").alias("ingestion_timestamp"),
+        col("courier.latitude").alias("latitude"),
+        col("courier.longitude").alias("longitude"),
+        col("courier.location_accuracy_meters").alias("location_accuracy_meters"),
+        col("courier.heading_degrees").alias("heading_degrees"),
+        col("courier.vehicle_type").alias("vehicle_type"),
+        col("courier.distance_to_restaurant_meters").alias("distance_to_restaurant_meters"),
+        col("courier.distance_to_customer_meters").alias("distance_to_customer_meters"),
+        col("courier.session_id").alias("session_id"),
+        col("courier.shift_duration_seconds").alias("shift_duration_seconds"),
+        col("courier.deliveries_completed_in_session").alias("deliveries_completed_in_session"),
+        col("courier.is_duplicate").alias("is_duplicate"),
+        col("courier.is_late_arrival").alias("is_late_arrival"),
+        col("courier.anomaly_flag").alias("anomaly_flag"),
     )
+
     return result
