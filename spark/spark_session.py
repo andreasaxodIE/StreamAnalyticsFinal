@@ -65,8 +65,8 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
 
     # Fixed connector versions to avoid the Spark 4.0 class mismatch error
     jar_packages = ",".join([
-        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
-        "org.apache.spark:spark-avro_2.12:3.5.1",
+    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
+    "org.apache.spark:spark-avro_2.12:3.5.1",
     ])
 
     print("Using packages:")
