@@ -1,39 +1,28 @@
 import os
 import platform
-import pyspark
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, from_json
+from pyspark.sql.types import (
+    StructType, StructField, StringType, IntegerType,
+    DoubleType, TimestampType
+)
 
-# Optional: adjust if you already define REPO_ROOT elsewhere
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-
+# -----------------------------
+# Spark session
+# -----------------------------
 def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
-    """
-    Creates a Spark session with dynamically matched Kafka + Avro dependencies.
-    This avoids version mismatch errors between Spark runtime and connectors.
-    """
-
-    # Get installed PySpark version (e.g., 3.5.1 or 4.0.0)
-    spark_version = ".".join(pyspark.__version__.split(".")[:3])
-
-    # Choose correct Scala version
-    # Spark 4.x → Scala 2.13
-    # Spark 3.x → Scala 2.12
-    scala_suffix = "2.13" if spark_version.startswith("4.") else "2.12"
-
-    # Build correct package strings
     jar_packages = ",".join([
-        f"org.apache.spark:spark-sql-kafka-0-10_{scala_suffix}:{spark_version}",
-        f"org.apache.spark:spark-avro_{scala_suffix}:{spark_version}",
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
+        "org.apache.spark:spark-avro_2.12:3.5.1",
     ])
 
     print("========================================")
-    print(f" Spark Version Detected: {spark_version}")
-    print(f" Scala Version Used: {scala_suffix}")
+    print(" Using fixed Spark connector packages")
     print(f" Packages: {jar_packages}")
     print("========================================")
 
-    # Build Spark session
     builder = (
         SparkSession.builder
         .appName(app_name)
@@ -43,7 +32,6 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
         .config("spark.sql.shuffle.partitions", "4")
     )
 
-    # Fix for Windows file system issues
     if platform.system() == "Windows":
         builder = builder.config(
             "spark.sql.warehouse.dir",
@@ -51,16 +39,53 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
         )
 
     spark = builder.getOrCreate()
-
-    # Reduce log noise
     spark.sparkContext.setLogLevel("WARN")
-
     return spark
 
 
-# Example stream reader (keep yours if already defined)
+# -----------------------------
+# Schemas
+# -----------------------------
+orders_schema = StructType([
+    StructField("order_id", StringType(), True),
+    StructField("customer_id", StringType(), True),
+    StructField("restaurant_id", StringType(), True),
+    StructField("driver_id", StringType(), True),
+    StructField("status", StringType(), True),
+    StructField("total_amount", DoubleType(), True),
+    StructField("delivery_fee", DoubleType(), True),
+    StructField("payment_method", StringType(), True),
+    StructField("created_at", StringType(), True),
+    StructField("updated_at", StringType(), True),
+])
+
+drivers_schema = StructType([
+    StructField("driver_id", StringType(), True),
+    StructField("name", StringType(), True),
+    StructField("vehicle_type", StringType(), True),
+    StructField("rating", DoubleType(), True),
+    StructField("location_lat", DoubleType(), True),
+    StructField("location_lng", DoubleType(), True),
+    StructField("status", StringType(), True),
+    StructField("updated_at", StringType(), True),
+])
+
+restaurants_schema = StructType([
+    StructField("restaurant_id", StringType(), True),
+    StructField("name", StringType(), True),
+    StructField("cuisine", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("rating", DoubleType(), True),
+    StructField("prep_time_min", IntegerType(), True),
+    StructField("updated_at", StringType(), True),
+])
+
+
+# -----------------------------
+# Kafka readers
+# -----------------------------
 def read_orders_stream(spark):
-    return (
+    raw_df = (
         spark.readStream
         .format("kafka")
         .option("kafka.bootstrap.servers", "localhost:9092")
@@ -68,3 +93,52 @@ def read_orders_stream(spark):
         .option("startingOffsets", "latest")
         .load()
     )
+
+    parsed_df = (
+        raw_df
+        .selectExpr("CAST(value AS STRING) as json_str")
+        .select(from_json(col("json_str"), orders_schema).alias("data"))
+        .select("data.*")
+    )
+
+    return parsed_df
+
+
+def read_drivers_stream(spark):
+    raw_df = (
+        spark.readStream
+        .format("kafka")
+        .option("kafka.bootstrap.servers", "localhost:9092")
+        .option("subscribe", "drivers")
+        .option("startingOffsets", "latest")
+        .load()
+    )
+
+    parsed_df = (
+        raw_df
+        .selectExpr("CAST(value AS STRING) as json_str")
+        .select(from_json(col("json_str"), drivers_schema).alias("data"))
+        .select("data.*")
+    )
+
+    return parsed_df
+
+
+def read_restaurants_stream(spark):
+    raw_df = (
+        spark.readStream
+        .format("kafka")
+        .option("kafka.bootstrap.servers", "localhost:9092")
+        .option("subscribe", "restaurants")
+        .option("startingOffsets", "latest")
+        .load()
+    )
+
+    parsed_df = (
+        raw_df
+        .selectExpr("CAST(value AS STRING) as json_str")
+        .select(from_json(col("json_str"), restaurants_schema).alias("data"))
+        .select("data.*")
+    )
+
+    return parsed_df
