@@ -70,14 +70,18 @@
     },
     {
       "name": "event_timestamp",
-      "type": "long",
-      "logicalType": "timestamp-millis",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
       "doc": "Event time in epoch milliseconds. Primary watermark field. GPS pings emit every ~15 seconds when active."
     },
     {
       "name": "ingestion_timestamp",
-      "type": "long",
-      "logicalType": "timestamp-millis",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
       "doc": "Broker ingestion time. Delta vs event_timestamp used to detect network delays or device clock skew."
     },
     {
