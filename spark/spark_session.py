@@ -131,6 +131,40 @@ def read_couriers_stream(spark):
 # ---------------------------------------------------------------------------
 # AVRO deserialization helpers
 # ---------------------------------------------------------------------------
+def deserialize_orders(df):
+    from pyspark.sql.avro.functions import from_avro
+    from pyspark.sql.functions import col
+
+    decoded = df.select(
+        from_avro(col("value"), ORDER_AVRO_SCHEMA).alias("order")
+    )
+
+    result = decoded.select(
+        col("order.event_id").alias("event_id"),
+        col("order.order_id").alias("order_id"),
+        col("order.customer_id").alias("customer_id"),
+        col("order.restaurant_id").alias("restaurant_id"),
+        col("order.courier_id").alias("courier_id"),
+        col("order.zone_id").alias("zone_id"),
+        col("order.order_status").alias("order_status"),
+        col("order.previous_status").alias("previous_status"),
+        col("order.event_timestamp").alias("event_timestamp"),
+        col("order.ingestion_timestamp").alias("ingestion_timestamp"),
+        col("order.order_total_cents").alias("order_total_cents"),
+        col("order.estimated_prep_time_seconds").alias("estimated_prep_time_seconds"),
+        col("order.estimated_delivery_time_seconds").alias("estimated_delivery_time_seconds"),
+        col("order.actual_prep_time_seconds").alias("actual_prep_time_seconds"),
+        col("order.actual_delivery_time_seconds").alias("actual_delivery_time_seconds"),
+        col("order.is_peak_hour").alias("is_peak_hour"),
+        col("order.weather_condition").alias("weather_condition"),
+        col("order.cancellation_reason").alias("cancellation_reason"),
+        col("order.customer_rating").alias("customer_rating"),
+        col("order.is_duplicate").alias("is_duplicate"),
+        col("order.is_late_arrival").alias("is_late_arrival"),
+    )
+
+    return result
+
 def deserialize_couriers(df):
     from pyspark.sql.avro.functions import from_avro
     from pyspark.sql.functions import col
