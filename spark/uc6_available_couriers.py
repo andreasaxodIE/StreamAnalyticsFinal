@@ -18,7 +18,7 @@ from spark_session import (
     deserialize_couriers,
 )
 from pyspark.sql.functions import (
-    col, window, approx_count_distinct,
+    col, window, countDistinct,
 )
 
 
@@ -35,17 +35,18 @@ def main():
         .filter(col("courier_status") == "ONLINE_IDLE")
     )
 
-    idle_wm = idle.withWatermark("event_timestamp", "1 minute")
+    idle_wm = idle.withWatermark("event_timestamp", "3 minutes")
 
-    # Tumbling window: 1 minute, count distinct couriers per zone
+    # Tumbling 2-min window, exact count of distinct couriers per zone.
+    # (approx_count_distinct uses HLL and is unreliable for small counts.)
     result = (
         idle_wm
         .groupBy(
-            window(col("event_timestamp"), "1 minute"),
+            window(col("event_timestamp"), "2 minutes"),
             col("zone_id"),
         )
         .agg(
-            approx_count_distinct("courier_id").alias("idle_couriers"),
+            countDistinct("courier_id").alias("idle_couriers"),
         )
         .select(
             col("window.start").alias("window_start"),
