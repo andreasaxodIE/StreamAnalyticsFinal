@@ -109,8 +109,15 @@ st.divider()
 st.header("UC6 — Available couriers per zone")
 df6 = load_csv("uc6_supply.csv")
 if df6 is not None and len(df6) > 0:
-    supply_by_zone = df6.groupby("zone_id")["idle_couriers"].mean().round(0)
-    st.bar_chart(supply_by_zone)
+    # Show the most recent window per zone so the chart reflects the
+    # current state rather than an average over the whole session.
+    df6_sorted = df6.sort_values("window_start")
+    latest = df6_sorted.groupby("zone_id").tail(1).set_index("zone_id")
+    col1, col2 = st.columns([1, 2])
+    col1.metric("Total idle couriers (latest window)", int(latest["idle_couriers"].sum()))
+    col1.caption(f"Window: {df6_sorted['window_start'].iloc[-1]}")
+    with col2:
+        st.bar_chart(latest["idle_couriers"])
 else:
     st.info("Waiting for UC6 data...")
 
