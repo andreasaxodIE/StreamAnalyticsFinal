@@ -73,8 +73,8 @@ def main():
     uc1 = (
         orders
         .filter(col("is_duplicate") == False)
-        .withWatermark("event_timestamp", "2 minutes")
-        .groupBy(window(col("event_timestamp"), "5 minutes"), col("zone_id"))
+        .withWatermark("event_timestamp", "30 seconds")
+        .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
         .agg(
             count("*").alias("total_orders"),
             _sum(when(col("order_status") == "CANCELLED", 1).otherwise(0)).alias("cancelled_orders"),
@@ -103,9 +103,9 @@ def main():
         .filter(col("order_status") == "READY_FOR_PICKUP")
         .filter(col("actual_prep_time_seconds").isNotNull())
         .filter(col("actual_prep_time_seconds") > 1800)
-        .withWatermark("event_timestamp", "2 minutes")
+        .withWatermark("event_timestamp", "30 seconds")
         .groupBy(
-            window(col("event_timestamp"), "10 minutes", "5 minutes"),
+            window(col("event_timestamp"), "2 minutes", "1 minute"),
             col("zone_id"), col("restaurant_id"), col("is_peak_hour"),
         )
         .agg(
@@ -136,8 +136,8 @@ def main():
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "DELIVERED")
         .filter(col("actual_delivery_time_seconds").isNotNull())
-        .withWatermark("event_timestamp", "2 minutes")
-        .groupBy(window(col("event_timestamp"), "10 minutes"), col("weather_condition"))
+        .withWatermark("event_timestamp", "30 seconds")
+        .groupBy(window(col("event_timestamp"), "2 minutes"), col("weather_condition"))
         .agg(
             count("*").alias("order_count"),
             _round(avg("actual_delivery_time_seconds"), 0).alias("avg_delivery_sec"),
@@ -165,9 +165,9 @@ def main():
     print("Starting UC7: Anomaly detection...")
     uc7 = (
         couriers
-        .withWatermark("event_timestamp", "2 minutes")
+        .withWatermark("event_timestamp", "30 seconds")
         .groupBy(
-            window(col("event_timestamp"), "10 minutes", "5 minutes"),
+            window(col("event_timestamp"), "2 minutes", "1 minute"),
             col("zone_id"), col("vehicle_type"),
         )
         .agg(
@@ -200,16 +200,16 @@ def main():
         deserialize_orders(raw_orders_4)
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "PLACED")
-        .withWatermark("event_timestamp", "2 minutes")
-        .groupBy(window(col("event_timestamp"), "5 minutes"), col("zone_id"))
+        .withWatermark("event_timestamp", "30 seconds")
+        .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
         .agg(count("*").alias("demand_orders"))
     )
     supply = (
         deserialize_couriers(raw_couriers_2)
         .filter(col("is_duplicate") == False)
         .filter(col("courier_status") == "ONLINE_IDLE")
-        .withWatermark("event_timestamp", "2 minutes")
-        .groupBy(window(col("event_timestamp"), "5 minutes"), col("zone_id"))
+        .withWatermark("event_timestamp", "30 seconds")
+        .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
         .agg(approx_count_distinct("courier_id").alias("supply_couriers"))
     )
     uc9 = (
@@ -238,21 +238,21 @@ def main():
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "PLACED")
         .select(col("order_id"), col("zone_id"), col("event_timestamp").alias("placed_ts"))
-        .withWatermark("placed_ts", "2 minutes")
+        .withWatermark("placed_ts", "30 seconds")
     )
     picked_up = (
         deserialize_orders(raw_orders_3)
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "PICKED_UP")
         .select(col("order_id").alias("pu_order_id"), col("event_timestamp").alias("picked_up_ts"))
-        .withWatermark("picked_up_ts", "2 minutes")
+        .withWatermark("picked_up_ts", "30 seconds")
     )
     uc10 = (
         placed.join(picked_up,
             expr("order_id = pu_order_id AND picked_up_ts >= placed_ts AND picked_up_ts <= placed_ts + interval 2 hours"),
             how="inner")
         .withColumn("processing_time_sec", col("picked_up_ts").cast("long") - col("placed_ts").cast("long"))
-        .groupBy(window(col("placed_ts"), "5 minutes"), col("zone_id"))
+        .groupBy(window(col("placed_ts"), "1 minute"), col("zone_id"))
         .agg(
             count("*").alias("order_count"),
             _round(avg("processing_time_sec"), 0).alias("avg_processing_sec"),
@@ -283,8 +283,8 @@ def main():
         .filter(col("order_status") == "PLACED")
         .filter(col("order_total_cents").isNotNull())
         .withColumn("order_total_eur", _round(col("order_total_cents") / 100, 2))
-        .withWatermark("event_timestamp", "2 minutes")
-        .groupBy(window(col("event_timestamp"), "5 minutes"), col("zone_id"))
+        .withWatermark("event_timestamp", "30 seconds")
+        .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
         .agg(
             count("*").alias("order_count"),
             _round(avg("order_total_eur"), 2).alias("avg_order_eur"),
