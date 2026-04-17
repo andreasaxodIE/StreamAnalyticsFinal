@@ -104,32 +104,6 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# UC6 — Available Couriers
-# ---------------------------------------------------------------------------
-st.header("UC6 — Available couriers per zone")
-df6 = load_csv("uc6_supply.csv")
-if df6 is not None and len(df6) > 0:
-    supply_by_zone = df6.groupby("zone_id")["idle_couriers"].mean().round(0)
-    st.bar_chart(supply_by_zone)
-else:
-    st.info("Waiting for UC6 data...")
-
-# --- Fixed UC6 panel (reads output/uc6_supply_fixed.csv written by
-# spark/uc6_available_couriers_fixed.py, which runs alongside run_all_ucs.py)
-st.subheader("UC6 (fixed) — latest window per zone")
-df6f = load_csv("uc6_supply_fixed.csv")
-if df6f is not None and len(df6f) > 0 and "window_start" in df6f.columns:
-    latest = (
-        df6f.sort_values("window_start")
-            .groupby("zone_id")["idle_couriers"].last()
-    )
-    st.bar_chart(latest)
-else:
-    st.info("Waiting for UC6 (fixed) data...")
-
-st.divider()
-
-# ---------------------------------------------------------------------------
 # UC7 — Anomaly Detection
 # ---------------------------------------------------------------------------
 st.header("UC7 — Anomaly detection")
