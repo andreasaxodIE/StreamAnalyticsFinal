@@ -160,30 +160,6 @@ def main():
     )
 
     # ===================================================================
-    # UC6 — Available couriers per zone
-    # ===================================================================
-    print("Starting UC6: Available couriers...")
-    uc6 = (
-        couriers
-        .filter(col("is_duplicate") == False)
-        .filter(col("courier_status") == "ONLINE_IDLE")
-        .withWatermark("event_timestamp", "1 minute")
-        .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
-        .agg(approx_count_distinct("courier_id").alias("idle_couriers"))
-        .select(
-            col("window.start").alias("window_start"),
-            col("window.end").alias("window_end"),
-            "zone_id", "idle_couriers",
-        )
-    )
-    q6 = (
-        uc6.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc6_supply.csv"))
-        .queryName("uc6")
-        .start()
-    )
-
-    # ===================================================================
     # UC7 — Anomaly detection
     # ===================================================================
     print("Starting UC7: Anomaly detection...")
@@ -333,7 +309,7 @@ def main():
     # ===================================================================
     # Wait for all queries
     # ===================================================================
-    queries = [q1, q3, q4, q6, q7, q9, q10, q11]
+    queries = [q1, q3, q4, q7, q9, q10, q11]
     print(f"\n✓ All {len(queries)} streaming queries started!")
     print(f"  CSV outputs → {OUTPUT_DIR}")
     print(f"  Press Ctrl+C to stop.\n")
