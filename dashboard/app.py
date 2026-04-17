@@ -109,17 +109,23 @@ st.divider()
 st.header("UC6 — Available couriers per zone")
 df6 = load_csv("uc6_supply.csv")
 if df6 is not None and len(df6) > 0:
-    # Show the most recent window per zone so the chart reflects the
-    # current state rather than an average over the whole session.
-    df6_sorted = df6.sort_values("window_start")
-    latest = df6_sorted.groupby("zone_id").tail(1).set_index("zone_id")
-    col1, col2 = st.columns([1, 2])
-    col1.metric("Total idle couriers (latest window)", int(latest["idle_couriers"].sum()))
-    col1.caption(f"Window: {df6_sorted['window_start'].iloc[-1]}")
-    with col2:
-        st.bar_chart(latest["idle_couriers"])
+    supply_by_zone = df6.groupby("zone_id")["idle_couriers"].mean().round(0)
+    st.bar_chart(supply_by_zone)
 else:
     st.info("Waiting for UC6 data...")
+
+# --- Fixed UC6 panel (reads output/uc6_supply_fixed.csv written by
+# spark/uc6_available_couriers_fixed.py, which runs alongside run_all_ucs.py)
+st.subheader("UC6 (fixed) — latest window per zone")
+df6f = load_csv("uc6_supply_fixed.csv")
+if df6f is not None and len(df6f) > 0 and "window_start" in df6f.columns:
+    latest = (
+        df6f.sort_values("window_start")
+            .groupby("zone_id")["idle_couriers"].last()
+    )
+    st.bar_chart(latest)
+else:
+    st.info("Waiting for UC6 (fixed) data...")
 
 st.divider()
 
