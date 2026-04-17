@@ -45,27 +45,39 @@ def write_to_csv(df, batch_id, filename, key_cols=("window_start", "zone_id")):
     prior history. Instead, read existing rows, concatenate the new batch,
     and keep the last value per (window_start, zone_id) key.
     """
-    if df.count() == 0:
-        return
-    import pandas as pd
-    path = os.path.join(OUTPUT_DIR, filename)
-    new_rows = df.toPandas()
+    try:
+        n = df.count()
+        if n == 0:
+            # Quiet heartbeat so we know the query is alive
+            if batch_id % 10 == 0:
+                print(f"  [{filename}] batch {batch_id}: 0 rows")
+            return
+        import pandas as pd
+        path = os.path.join(OUTPUT_DIR, filename)
+        new_rows = df.toPandas()
 
-    # Only use key columns that actually exist in the frame
-    keys = [c for c in key_cols if c in new_rows.columns]
+        keys = [c for c in key_cols if c in new_rows.columns]
 
-    if os.path.exists(path) and os.path.getsize(path) > 0 and keys:
-        try:
-            existing = pd.read_csv(path)
-            combined = pd.concat([existing, new_rows], ignore_index=True)
-            # Keep the most recent value for each key (new batch wins)
-            combined = combined.drop_duplicates(subset=keys, keep="last")
-        except Exception:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            try:
+                existing = pd.read_csv(path)
+                combined = pd.concat([existing, new_rows], ignore_index=True)
+                if keys:
+                    combined = combined.drop_duplicates(subset=keys, keep="last")
+            except Exception as e:
+                print(f"  [{filename}] could not merge existing ({e}); overwriting")
+                combined = new_rows
+        else:
             combined = new_rows
-    else:
-        combined = new_rows
 
-    combined.to_csv(path, index=False)
+        combined.to_csv(path, index=False)
+        print(f"  [{filename}] batch {batch_id}: +{n} rows → {len(combined)} total")
+    except Exception as e:
+        # Surface errors loudly — foreachBatch swallows them otherwise
+        import traceback
+        print(f"  [{filename}] ERROR in batch {batch_id}: {e}")
+        traceback.print_exc()
+        raise
 
 
 def main():
@@ -146,7 +158,10 @@ def main():
     )
     q3 = (
         uc3.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc3_prep_sla.csv"))
+        .foreachBatch(lambda df, bid: write_to_csv(
+            df, bid, "uc3_prep_sla.csv",
+            key_cols=("window_start", "zone_id", "restaurant_id", "is_peak_hour"),
+        ))
         .queryName("uc3")
         .start()
     )
@@ -178,7 +193,10 @@ def main():
     )
     q4 = (
         uc4.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc4_weather.csv"))
+        .foreachBatch(lambda df, bid: write_to_csv(
+            df, bid, "uc4_weather.csv",
+            key_cols=("window_start", "weather_condition"),
+        ))
         .queryName("uc4")
         .start()
     )
@@ -240,7 +258,10 @@ def main():
     )
     q7 = (
         uc7.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc7_anomalies.csv"))
+        .foreachBatch(lambda df, bid: write_to_csv(
+            df, bid, "uc7_anomalies.csv",
+            key_cols=("window_start", "zone_id", "vehicle_type"),
+        ))
         .queryName("uc7")
         .start()
     )
