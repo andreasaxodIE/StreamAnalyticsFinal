@@ -36,7 +36,7 @@ from spark_session import (
     AZURE_OUTPUT_PATH,
 )
 from pyspark.sql.functions import (
-    col, window, count, avg, min as _min, max as _max,
+    col, window, count, countDistinct, avg, min as _min, max as _max,
     sum as _sum, round as _round, when, expr, percentile_approx,
     approx_count_distinct, to_date,
 )
@@ -107,6 +107,9 @@ def main():
     # ===================================================================
     # UC1 — Order volume and cancellation rate by zone
     # ===================================================================
+    # Count DISTINCT orders (not lifecycle events). A single order emits
+    # ~6-10 events as it transitions through statuses; counting them all
+    # would inflate numbers ~8x and no longer represent "orders per zone".
     print("Starting UC1: Order volume & cancellation rate...")
     uc1 = (
         orders
@@ -114,10 +117,13 @@ def main():
         .withWatermark("event_timestamp", "30 seconds")
         .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
         .agg(
-            count("*").alias("total_orders"),
-            _sum(when(col("order_status") == "CANCELLED", 1).otherwise(0)).alias("cancelled_orders"),
+            countDistinct("order_id").alias("total_orders"),
+            countDistinct(
+                when(col("order_status") == "CANCELLED", col("order_id"))
+            ).alias("cancelled_orders"),
         )
-        .withColumn("cancellation_rate", _round(col("cancelled_orders") / col("total_orders") * 100, 2))
+        .withColumn("cancellation_rate",
+                    _round(col("cancelled_orders") / col("total_orders") * 100, 2))
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
@@ -138,9 +144,9 @@ def main():
         .filter(col("order_status") == "READY_FOR_PICKUP")
         .filter(col("actual_prep_time_seconds").isNotNull())
         .filter(col("actual_prep_time_seconds") > 1800)
-        .withWatermark("event_timestamp", "10 seconds")
+        .withWatermark("event_timestamp", "30 seconds")
         .groupBy(
-            window(col("event_timestamp"), "1 minute", "30 seconds"),
+            window(col("event_timestamp"), "2 minutes", "1 minute"),
             col("zone_id"), col("restaurant_id"), col("is_peak_hour"),
         )
         .agg(
@@ -261,14 +267,14 @@ def main():
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "PLACED")
         .select(col("order_id"), col("zone_id"), col("event_timestamp").alias("placed_ts"))
-        .withWatermark("placed_ts", "10 seconds")
+        .withWatermark("placed_ts", "30 seconds")
     )
     picked_up = (
         deserialize_orders(raw_orders_3)
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "PICKED_UP")
         .select(col("order_id").alias("pu_order_id"), col("event_timestamp").alias("picked_up_ts"))
-        .withWatermark("picked_up_ts", "10 seconds")
+        .withWatermark("picked_up_ts", "30 seconds")
     )
     uc10 = (
         placed.join(picked_up,
