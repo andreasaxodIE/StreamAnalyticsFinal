@@ -13,6 +13,26 @@ import os
 import sys
 
 # ---------------------------------------------------------------------------
+# Azure Storage configuration (hard-coded for demo)
+# ---------------------------------------------------------------------------
+# Fill these in once. The rest of the pipeline (run_all_ucs.py, dashboard/app.py)
+# imports from here so you only edit credentials in one place.
+#
+# SECURITY: do NOT commit this file to a public repo with real values. After
+# the demo, rotate the key in Azure Portal → Storage account → Access keys.
+AZURE_STORAGE_ACCOUNT = "iesstsabbadbaa"
+AZURE_STORAGE_ACCOUNT_KEY = "GfD8mpJmqw6gTqzyRpmV5tbHZ7RP1xkiO9X9hgmaMTdnHL1PL62AVmlejOmhHPFkBr2Pfl9DvmUC+AStYJXlzA=="
+AZURE_CONTAINER = "streaming9"
+# Path prefix inside the container. You can change "runs/demo" to anything.
+AZURE_OUTPUT_PATH = f"abfss://{AZURE_CONTAINER}@{AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/runs/demo"
+
+# Env vars still override — useful if you ever want to point at a different
+# account without editing this file.
+AZURE_STORAGE_ACCOUNT = os.environ.get("AZURE_STORAGE_ACCOUNT", AZURE_STORAGE_ACCOUNT)
+AZURE_STORAGE_ACCOUNT_KEY = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY", AZURE_STORAGE_ACCOUNT_KEY)
+AZURE_OUTPUT_PATH = os.environ.get("OUTPUT_BASE", AZURE_OUTPUT_PATH)
+
+# ---------------------------------------------------------------------------
 # Path setup
 # ---------------------------------------------------------------------------
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,10 +84,21 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
                 f.write("")
 
     # Fixed connector versions to avoid the Spark 4.0 class mismatch error
-    jar_packages = ",".join([
-    "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.2",
-    "org.apache.spark:spark-avro_2.13:4.0.2",
-    ])
+    jar_list = [
+        "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.2",
+        "org.apache.spark:spark-avro_2.13:4.0.2",
+    ]
+
+    # Add Azure Blob / ADLS Gen2 connectors when writing to abfss:// paths.
+    # Matching versions for Spark 4.0 / Hadoop 3.4.
+    using_azure = AZURE_OUTPUT_PATH.startswith(("abfss://", "wasbs://"))
+    if using_azure:
+        jar_list.extend([
+            "org.apache.hadoop:hadoop-azure:3.4.1",
+            "com.microsoft.azure:azure-storage:8.6.6",
+        ])
+
+    jar_packages = ",".join(jar_list)
 
     print("Using packages:")
     print(jar_packages)
@@ -80,6 +111,26 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
         .config("spark.jars.packages", jar_packages)
         .config("spark.sql.shuffle.partitions", "4")
     )
+
+    # Azure Storage auth via SharedKey (credentials set at top of this file).
+    if using_azure:
+        if (AZURE_STORAGE_ACCOUNT.startswith("YOUR_") or
+                AZURE_STORAGE_ACCOUNT_KEY.startswith("YOUR_")):
+            print("ERROR: fill in AZURE_STORAGE_ACCOUNT / AZURE_STORAGE_ACCOUNT_KEY "
+                  "at the top of spark/spark_session.py before running with an "
+                  "abfss:// output path.")
+            sys.exit(1)
+        builder = (
+            builder
+            .config(
+                f"spark.hadoop.fs.azure.account.auth.type.{AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net",
+                "SharedKey",
+            )
+            .config(
+                f"spark.hadoop.fs.azure.account.key.{AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net",
+                AZURE_STORAGE_ACCOUNT_KEY,
+            )
+        )
 
     if platform.system() == "Windows":
         builder = builder.config(
