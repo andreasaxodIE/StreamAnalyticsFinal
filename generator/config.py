@@ -207,7 +207,9 @@ class GeneratorConfig:
 
     # These values control how long the simulation runs and roughly how many
     # events it tries to generate each second.
-    simulation_duration_seconds: int = 3600
+    # Default is 15 simulated minutes for fast demos; the producer can override
+    # with --duration. The courier shift logic scales with this automatically.
+    simulation_duration_seconds: int = 900
     events_per_second_target: float = 10.0
 
     # These rates introduce imperfect or edge-case behaviour into the data.
