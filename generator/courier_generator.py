@@ -384,8 +384,14 @@ class CourierFleetGenerator:
 
         for cid in self.courier_ids:
             sim = CourierSimulator(cid, self.cfg)
-            shift_start = start_ts_ms + random.randint(0, 3600_000)
-            shift_dur = random.randint(3600, self.cfg.simulation_duration_seconds)
+            # Scale shift jitter and minimum shift length with the total simulation
+            # duration so short demos work (simulation_duration_seconds can be < 3600).
+            sim_dur = self.cfg.simulation_duration_seconds
+            jitter_max_ms = min(3600_000, sim_dur * 1000 // 2)
+            shift_start = start_ts_ms + random.randint(0, jitter_max_ms)
+            min_shift = max(60, sim_dur // 4)   # at least 60s, otherwise a quarter of sim_dur
+            max_shift = max(min_shift, sim_dur)
+            shift_dur = random.randint(min_shift, max_shift)
             all_events.extend(sim.generate_shift(shift_start, shift_dur))
 
         all_events.sort(key=lambda e: e["ingestion_timestamp"])
