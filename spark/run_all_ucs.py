@@ -36,7 +36,7 @@ from spark_session import (
     AZURE_OUTPUT_PATH,
 )
 from pyspark.sql.functions import (
-    col, window, count, countDistinct, avg, min as _min, max as _max,
+    col, window, count, avg, min as _min, max as _max,
     sum as _sum, round as _round, when, expr, percentile_approx,
     approx_count_distinct, to_date,
 )
@@ -107,9 +107,11 @@ def main():
     # ===================================================================
     # UC1 — Order volume and cancellation rate by zone
     # ===================================================================
-    # Count DISTINCT orders (not lifecycle events). A single order emits
-    # ~6-10 events as it transitions through statuses; counting them all
-    # would inflate numbers ~8x and no longer represent "orders per zone".
+    # Counts unique orders by exploiting the fact that certain statuses
+    # fire exactly once per order (PLACED at start, CANCELLED terminal).
+    # We can't use countDistinct() because streaming aggregations don't
+    # support it — but summing a status-matching indicator works and is
+    # exact (not approximate).
     print("Starting UC1: Order volume & cancellation rate...")
     uc1 = (
         orders
@@ -117,10 +119,8 @@ def main():
         .withWatermark("event_timestamp", "30 seconds")
         .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
         .agg(
-            countDistinct("order_id").alias("total_orders"),
-            countDistinct(
-                when(col("order_status") == "CANCELLED", col("order_id"))
-            ).alias("cancelled_orders"),
+            _sum(when(col("order_status") == "PLACED", 1).otherwise(0)).alias("total_orders"),
+            _sum(when(col("order_status") == "CANCELLED", 1).otherwise(0)).alias("cancelled_orders"),
         )
         .withColumn("cancellation_rate",
                     _round(col("cancelled_orders") / col("total_orders") * 100, 2))
