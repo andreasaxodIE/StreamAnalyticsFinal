@@ -328,7 +328,7 @@ def main():
     # ===================================================================
     queries = [q1, q3, q4, q7, q9, q10, q11]
     print(f"\n✓ All {len(queries)} streaming queries started!")
-    print(f"  CSV outputs → {OUTPUT_DIR}")
+    print(f"  Parquet outputs → {OUTPUT_BASE}")
     print(f"  Press Ctrl+C to stop.\n")
 
     try:
