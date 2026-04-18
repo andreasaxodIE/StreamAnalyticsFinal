@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
 """
-run_all_ucs.py — Runs all 8 use cases in a single Spark session.
+run_all_ucs.py — Runs all 7 use cases in a single Spark session.
 
-Writes aggregated results to CSV files in output/ for the Streamlit dashboard.
+Writes aggregated results as PARQUET using Spark's native sink. Output can be
+either local disk or Azure Blob (ADLS Gen2), controlled by the OUTPUT_BASE
+env var:
 
-Usage:
+    # Local (default)
     python spark/run_all_ucs.py
+
+    # Azure Blob / ADLS Gen2
+    OUTPUT_BASE=abfss://<container>@<account>.dfs.core.windows.net/streaming \\
+        python spark/run_all_ucs.py
+
+Each UC writes to its own subdirectory (uc1/, uc3/, ...), partitioned by
+window_date so old data ages out cleanly and the dashboard can read only
+the latest partition.
 
 Requires:
     - HADOOP_HOME set (Windows: C:\\hadoop with winutils.exe)
     - Producer running to send events to Event Hub
+    - For Azure output: AZURE_STORAGE_ACCOUNT_KEY env var set
 """
 
 import os
@@ -22,34 +33,61 @@ from spark_session import (
     create_spark_session,
     read_orders_stream, read_couriers_stream,
     deserialize_orders, deserialize_couriers,
+    AZURE_OUTPUT_PATH,
 )
 from pyspark.sql.functions import (
     col, window, count, avg, min as _min, max as _max,
     sum as _sum, round as _round, when, expr, percentile_approx,
-    approx_count_distinct,
+    approx_count_distinct, to_date,
 )
 
 # ---------------------------------------------------------------------------
-# Output directory
+# Output configuration
 # ---------------------------------------------------------------------------
+# Default: the hard-coded Azure path from spark_session.py.
+# Override with OUTPUT_BASE=./output_parquet to run locally.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_DIR = os.path.join(REPO_ROOT, "output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_BASE = os.environ.get("OUTPUT_BASE", AZURE_OUTPUT_PATH)
+CHECKPOINT_BASE = os.environ.get(
+    "CHECKPOINT_BASE", os.path.join(REPO_ROOT, "checkpoints")
+)
+
+# Ensure local dirs exist when using local paths (no-op for abfss://)
+if not OUTPUT_BASE.startswith(("abfss://", "wasbs://", "s3://", "gs://")):
+    os.makedirs(OUTPUT_BASE, exist_ok=True)
+if not CHECKPOINT_BASE.startswith(("abfss://", "wasbs://", "s3://", "gs://")):
+    os.makedirs(CHECKPOINT_BASE, exist_ok=True)
 
 
-def write_to_csv(df, batch_id, filename):
-    """foreachBatch sink: overwrite CSV with latest results."""
-    if df.count() > 0:
-        path = os.path.join(OUTPUT_DIR, filename)
-        df.toPandas().to_csv(path, index=False)
+def parquet_sink(df, name, partition_cols=("window_date",)):
+    """Native Spark Parquet sink for a streaming DataFrame.
+
+    Writes to {OUTPUT_BASE}/{name}/ with checkpoint at {CHECKPOINT_BASE}/{name}/.
+    Appends new rows (required for Parquet sink) — rows are emitted once their
+    window closes per the watermark.
+    """
+    output_path = f"{OUTPUT_BASE.rstrip('/')}/{name}"
+    checkpoint_path = f"{CHECKPOINT_BASE.rstrip('/')}/{name}"
+    writer = (
+        df.writeStream
+        .format("parquet")
+        .outputMode("append")
+        .option("path", output_path)
+        .option("checkpointLocation", checkpoint_path)
+        .queryName(name)
+    )
+    if partition_cols:
+        writer = writer.partitionBy(*partition_cols)
+    return writer.start()
 
 
 def main():
     spark = create_spark_session("FoodDelivery_AllUCs")
 
     print(f"\n{'='*60}")
-    print(f"  Spark Streaming — All Use Cases")
-    print(f"  Output: {OUTPUT_DIR}")
+    print(f"  Spark Streaming — All Use Cases (Parquet sink)")
+    print(f"  Output:     {OUTPUT_BASE}")
+    print(f"  Checkpoint: {CHECKPOINT_BASE}")
     print(f"{'='*60}\n")
 
     # ===================================================================
@@ -83,15 +121,12 @@ def main():
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            "zone_id", "total_orders", "cancelled_orders", "cancellation_rate",
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("total_orders"),
+            col("cancelled_orders"), col("cancellation_rate"),
         )
     )
-    q1 = (
-        uc1.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc1_order_volume.csv"))
-        .queryName("uc1")
-        .start()
-    )
+    q1 = parquet_sink(uc1, "uc1_order_volume")
 
     # ===================================================================
     # UC3 — Peak-hour prep time SLA breaches
@@ -116,16 +151,12 @@ def main():
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            "zone_id", "restaurant_id", "is_peak_hour",
-            "breach_count", "avg_prep_time_sec", "max_prep_time_sec",
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("restaurant_id"), col("is_peak_hour"),
+            col("breach_count"), col("avg_prep_time_sec"), col("max_prep_time_sec"),
         )
     )
-    q3 = (
-        uc3.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc3_prep_sla.csv"))
-        .queryName("uc3")
-        .start()
-    )
+    q3 = parquet_sink(uc3, "uc3_prep_sla")
 
     # ===================================================================
     # UC4 — Weather impact on delivery times
@@ -148,16 +179,13 @@ def main():
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            "weather_condition", "order_count",
-            "avg_delivery_sec", "min_delivery_sec", "max_delivery_sec", "p95_delivery_sec",
+            to_date(col("window.start")).alias("window_date"),
+            col("weather_condition"), col("order_count"),
+            col("avg_delivery_sec"), col("min_delivery_sec"),
+            col("max_delivery_sec"), col("p95_delivery_sec"),
         )
     )
-    q4 = (
-        uc4.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc4_weather.csv"))
-        .queryName("uc4")
-        .start()
-    )
+    q4 = parquet_sink(uc4, "uc4_weather")
 
     # ===================================================================
     # UC7 — Anomaly detection
@@ -181,16 +209,14 @@ def main():
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            "zone_id", "vehicle_type", "total_events", "total_anomalies",
-            "anomaly_rate", "impossible_speed", "location_jump", "offline_mid_delivery",
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("vehicle_type"),
+            col("total_events"), col("total_anomalies"),
+            col("anomaly_rate"), col("impossible_speed"),
+            col("location_jump"), col("offline_mid_delivery"),
         )
     )
-    q7 = (
-        uc7.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc7_anomalies.csv"))
-        .queryName("uc7")
-        .start()
-    )
+    q7 = parquet_sink(uc7, "uc7_anomalies")
 
     # ===================================================================
     # UC9 — Supply vs demand (stream-stream join)
@@ -219,15 +245,12 @@ def main():
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            "zone_id", "demand_orders", "supply_couriers", "demand_supply_ratio",
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("demand_orders"),
+            col("supply_couriers"), col("demand_supply_ratio"),
         )
     )
-    q9 = (
-        uc9.writeStream.outputMode("append")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc9_supply_demand.csv"))
-        .queryName("uc9")
-        .start()
-    )
+    q9 = parquet_sink(uc9, "uc9_supply_demand")
 
     # ===================================================================
     # UC10 — Avg processing time (PLACED → PICKED_UP self-join)
@@ -262,16 +285,13 @@ def main():
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            "zone_id", "order_count",
-            "avg_processing_sec", "min_processing_sec", "max_processing_sec",
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("order_count"),
+            col("avg_processing_sec"), col("min_processing_sec"),
+            col("max_processing_sec"),
         )
     )
-    q10 = (
-        uc10.writeStream.outputMode("append")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc10_processing_time.csv"))
-        .queryName("uc10")
-        .start()
-    )
+    q10 = parquet_sink(uc10, "uc10_processing_time")
 
     # ===================================================================
     # UC11 — Avg order value per zone
@@ -295,16 +315,13 @@ def main():
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            "zone_id", "order_count",
-            "avg_order_eur", "min_order_eur", "max_order_eur", "total_revenue_eur",
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("order_count"),
+            col("avg_order_eur"), col("min_order_eur"),
+            col("max_order_eur"), col("total_revenue_eur"),
         )
     )
-    q11 = (
-        uc11.writeStream.outputMode("update")
-        .foreachBatch(lambda df, bid: write_to_csv(df, bid, "uc11_order_value.csv"))
-        .queryName("uc11")
-        .start()
-    )
+    q11 = parquet_sink(uc11, "uc11_order_value")
 
     # ===================================================================
     # Wait for all queries
