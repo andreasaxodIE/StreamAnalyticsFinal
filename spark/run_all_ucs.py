@@ -123,7 +123,8 @@ def main():
             _sum(when(col("order_status") == "CANCELLED", 1).otherwise(0)).alias("cancelled_orders"),
         )
         .withColumn("cancellation_rate",
-                    _round(col("cancelled_orders") / col("total_orders") * 100, 2))
+                    when(col("total_orders") == 0, 0.0)
+                    .otherwise(_round(col("cancelled_orders") / col("total_orders") * 100, 2)))
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
@@ -211,7 +212,9 @@ def main():
             _sum(when(col("anomaly_flag") == "OFFLINE_MID_DELIVERY", 1).otherwise(0)).alias("offline_mid_delivery"),
             _sum(when(col("anomaly_flag").isNotNull(), 1).otherwise(0)).alias("total_anomalies"),
         )
-        .withColumn("anomaly_rate", _round(col("total_anomalies") / col("total_events") * 100, 2))
+        .withColumn("anomaly_rate",
+                    when(col("total_events") == 0, 0.0)
+                    .otherwise(_round(col("total_anomalies") / col("total_events") * 100, 2)))
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
