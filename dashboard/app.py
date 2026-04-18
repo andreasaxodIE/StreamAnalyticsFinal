@@ -116,10 +116,15 @@ st.divider()
 st.header("UC1 — Order volume & cancellation rate by zone")
 df1 = load_csv("uc1_order_volume.csv")
 if df1 is not None and len(df1) > 0:
+    total_orders    = int(df1["total_orders"].sum())
+    total_cancelled = int(df1["cancelled_orders"].sum())
+    # Compute rate from totals, not average-of-rates (avoids Simpson's paradox).
+    overall_rate = (total_cancelled / total_orders * 100) if total_orders else 0.0
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total orders", int(df1["total_orders"].sum()))
-    col2.metric("Cancelled", int(df1["cancelled_orders"].sum()))
-    col3.metric("Avg cancellation rate", f"{df1['cancellation_rate'].mean():.1f}%")
+    col1.metric("Total orders", total_orders)
+    col2.metric("Cancelled", total_cancelled)
+    col3.metric("Cancellation rate", f"{overall_rate:.1f}%")
 
     st.bar_chart(df1.groupby("zone_id")[["total_orders", "cancelled_orders"]].sum())
 else:
@@ -178,11 +183,15 @@ if df7 is not None and len(df7) > 0:
     anomaly_cols = ["impossible_speed", "location_jump", "offline_mid_delivery"]
     present_cols = [c for c in anomaly_cols if c in df7.columns]
 
+    total_events    = int(df7["total_events"].sum())
+    total_anomalies = int(df7["total_anomalies"].sum())
+    # Compute rate from totals, not average-of-rates.
+    overall_rate = (total_anomalies / total_events * 100) if total_events else 0.0
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total events scanned", int(df7["total_events"].sum()))
-    col2.metric("Anomalies detected", int(df7["total_anomalies"].sum()))
-    avg_rate = df7["anomaly_rate"].mean() if len(df7) > 0 else 0
-    col3.metric("Avg anomaly rate", f"{avg_rate:.2f}%")
+    col1.metric("Total events scanned", total_events)
+    col2.metric("Anomalies detected", total_anomalies)
+    col3.metric("Anomaly rate", f"{overall_rate:.2f}%")
 
     if present_cols:
         anomaly_summary = df7.groupby("zone_id")[present_cols].sum()
@@ -198,19 +207,23 @@ st.divider()
 st.header("UC9 — Supply vs demand imbalance by zone")
 df9 = load_csv("uc9_supply_demand.csv")
 if df9 is not None and len(df9) > 0:
-    sd_by_zone = df9.groupby("zone_id").agg({
-        "demand_orders": "sum",
-        "supply_couriers": "sum",
-        "demand_supply_ratio": "mean",
-    }).round(2)
+    # Show the latest window per zone — summing courier counts across windows
+    # double-counts the same couriers (they appear in every minute they're idle).
+    latest9 = (
+        df9.sort_values("window_start")
+           .groupby("zone_id")
+           .tail(1)
+           .set_index("zone_id")
+    )
 
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Demand vs supply by zone")
-        st.bar_chart(sd_by_zone[["demand_orders", "supply_couriers"]])
+        st.subheader("Demand vs supply by zone (latest window)")
+        st.bar_chart(latest9[["demand_orders", "supply_couriers"]])
     with col2:
-        st.subheader("Demand/supply ratio")
-        st.bar_chart(sd_by_zone["demand_supply_ratio"])
+        st.subheader("Demand/supply ratio (latest window)")
+        st.bar_chart(latest9["demand_supply_ratio"])
+    st.caption(f"Latest window: {df9['window_end'].max()}")
 else:
     st.info("Waiting for UC9 data...")
 
@@ -258,6 +271,7 @@ if df11 is not None and len(df11) > 0:
     col3.metric("Total revenue", f"€{val_by_zone['total_revenue_eur'].sum():,.2f}")
 
     st.bar_chart(val_by_zone[["avg_order_eur", "total_revenue_eur"]])
+    st.caption("Total revenue accumulates over the demo — it grows with each closed window.")
 else:
     st.info("Waiting for UC11 data...")
 
