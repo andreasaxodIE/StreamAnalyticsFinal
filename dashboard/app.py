@@ -1,23 +1,45 @@
 """
 Streamlit Dashboard — Real-Time Food Delivery Analytics
 
-Reads CSV files produced by spark/run_all_ucs.py and displays
-live-updating charts for all 8 use cases.
+Reads Parquet datasets produced by spark/run_all_ucs.py and displays
+live-updating charts for all 7 use cases.
+
+Reads from the same OUTPUT_BASE that Spark writes to:
+  - Local:  ./output_parquet/ (default)
+  - Azure:  abfss://<container>@<account>.dfs.core.windows.net/...
 
 Usage:
     streamlit run dashboard/app.py
+
+For Azure reads, set:
+    OUTPUT_BASE=abfss://...
+    AZURE_STORAGE_ACCOUNT=<account>
+    AZURE_STORAGE_ACCOUNT_KEY=<key>
+(requires: pip install adlfs)
 """
 
 import os
+import sys
 import time
 import pandas as pd
 import streamlit as st
 
+# Import hard-coded Azure credentials from spark_session.py
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO_ROOT, "spark"))
+from spark_session import (  # noqa: E402
+    AZURE_OUTPUT_PATH,
+    AZURE_STORAGE_ACCOUNT,
+    AZURE_STORAGE_ACCOUNT_KEY,
+)
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_DIR = os.path.join(REPO_ROOT, "output")
+# Default to the hard-coded Azure path. Override with OUTPUT_BASE=./output_parquet
+# for local mode.
+OUTPUT_BASE = os.environ.get("OUTPUT_BASE", AZURE_OUTPUT_PATH)
+USING_AZURE = OUTPUT_BASE.startswith(("abfss://", "wasbs://"))
 
 st.set_page_config(
     page_title="Food Delivery Analytics — Group 09",
@@ -26,15 +48,58 @@ st.set_page_config(
 )
 
 
+def _azure_storage_options():
+    """Build fsspec/adlfs storage options from the hard-coded credentials."""
+    return {
+        "account_name": AZURE_STORAGE_ACCOUNT,
+        "account_key": AZURE_STORAGE_ACCOUNT_KEY,
+    }
+
+
+# Translate the old CSV filenames the dashboard uses into parquet
+# dataset directories produced by run_all_ucs.py.
+_CSV_TO_PARQUET = {
+    "uc1_order_volume.csv":     "uc1_order_volume",
+    "uc3_prep_sla.csv":         "uc3_prep_sla",
+    "uc4_weather.csv":          "uc4_weather",
+    "uc7_anomalies.csv":        "uc7_anomalies",
+    "uc9_supply_demand.csv":    "uc9_supply_demand",
+    "uc10_processing_time.csv": "uc10_processing_time",
+    "uc11_order_value.csv":     "uc11_order_value",
+}
+
+
 def load_csv(filename):
-    """Load a CSV file from the output directory. Returns None if not found."""
-    path = os.path.join(OUTPUT_DIR, filename)
-    if os.path.exists(path) and os.path.getsize(path) > 0:
-        try:
-            return pd.read_csv(path)
-        except Exception:
-            return None
-    return None
+    """Load a Parquet dataset (keeps the name for call-site compatibility).
+
+    Returns None if the dataset doesn't exist yet or is empty.
+    """
+    dataset = _CSV_TO_PARQUET.get(filename)
+    if dataset is None:
+        return None
+
+    path = f"{OUTPUT_BASE.rstrip('/')}/{dataset}"
+
+    try:
+        if USING_AZURE:
+            # adlfs handles abfss:// via fsspec
+            df = pd.read_parquet(path, storage_options=_azure_storage_options())
+        else:
+            if not os.path.isdir(path):
+                return None
+            # Any .parquet files yet?
+            has_data = any(
+                f.endswith(".parquet")
+                for _, _, files in os.walk(path)
+                for f in files
+            )
+            if not has_data:
+                return None
+            df = pd.read_parquet(path)
+    except Exception:
+        return None
+
+    return df if len(df) > 0 else None
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +107,7 @@ def load_csv(filename):
 # ---------------------------------------------------------------------------
 st.title("🚴 Real-Time Food Delivery Analytics")
 st.caption("Group 09 — BBADBA A | Streaming from Azure Event Hub → Spark → Dashboard")
+st.caption(f"Reading Parquet from: `{OUTPUT_BASE}`" + (" (Azure)" if USING_AZURE else " (local)"))
 st.divider()
 
 # ---------------------------------------------------------------------------
