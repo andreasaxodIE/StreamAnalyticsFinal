@@ -138,9 +138,9 @@ def main():
         .filter(col("order_status") == "READY_FOR_PICKUP")
         .filter(col("actual_prep_time_seconds").isNotNull())
         .filter(col("actual_prep_time_seconds") > 1800)
-        .withWatermark("event_timestamp", "30 seconds")
+        .withWatermark("event_timestamp", "10 seconds")
         .groupBy(
-            window(col("event_timestamp"), "2 minutes", "1 minute"),
+            window(col("event_timestamp"), "1 minute", "30 seconds"),
             col("zone_id"), col("restaurant_id"), col("is_peak_hour"),
         )
         .agg(
@@ -261,14 +261,14 @@ def main():
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "PLACED")
         .select(col("order_id"), col("zone_id"), col("event_timestamp").alias("placed_ts"))
-        .withWatermark("placed_ts", "30 seconds")
+        .withWatermark("placed_ts", "10 seconds")
     )
     picked_up = (
         deserialize_orders(raw_orders_3)
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "PICKED_UP")
         .select(col("order_id").alias("pu_order_id"), col("event_timestamp").alias("picked_up_ts"))
-        .withWatermark("picked_up_ts", "30 seconds")
+        .withWatermark("picked_up_ts", "10 seconds")
     )
     uc10 = (
         placed.join(picked_up,
