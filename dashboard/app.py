@@ -232,7 +232,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 # UC10 — Avg Processing Time
 # ---------------------------------------------------------------------------
-st.header("UC10 — Avg processing time per zone (PLACED → PICKED_UP)")
+st.header("UC10 — Avg prep time per zone")
 df10 = load_csv("uc10_processing_time.csv")
 if df10 is not None and len(df10) > 0:
     proc_by_zone = df10.groupby("zone_id").agg({
