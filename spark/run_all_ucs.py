@@ -41,18 +41,13 @@ from pyspark.sql.functions import (
     approx_count_distinct, to_date,
 )
 
-# ---------------------------------------------------------------------------
 # Output configuration
-# ---------------------------------------------------------------------------
-# Default: the hard-coded Azure path from spark_session.py.
-# Override with OUTPUT_BASE=./output_parquet to run locally.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_BASE = os.environ.get("OUTPUT_BASE", AZURE_OUTPUT_PATH)
 CHECKPOINT_BASE = os.environ.get(
     "CHECKPOINT_BASE", os.path.join(REPO_ROOT, "checkpoints")
 )
 
-# Ensure local dirs exist when using local paths (no-op for abfss://)
 if not OUTPUT_BASE.startswith(("abfss://", "wasbs://", "s3://", "gs://")):
     os.makedirs(OUTPUT_BASE, exist_ok=True)
 if not CHECKPOINT_BASE.startswith(("abfss://", "wasbs://", "s3://", "gs://")):
@@ -90,10 +85,7 @@ def main():
     print(f"  Checkpoint: {CHECKPOINT_BASE}")
     print(f"{'='*60}\n")
 
-    # ===================================================================
     # READ STREAMS (one per topic, shared across UCs)
-    # For stream-stream joins we need separate reads
-    # ===================================================================
     raw_orders_1 = read_orders_stream(spark)
     raw_orders_2 = read_orders_stream(spark)  # for UC10 self-join (left)
     raw_orders_3 = read_orders_stream(spark)  # for UC10 self-join (right)
@@ -104,14 +96,7 @@ def main():
     orders = deserialize_orders(raw_orders_1)
     couriers = deserialize_couriers(raw_couriers_1)
 
-    # ===================================================================
     # UC1 — Order volume and cancellation rate by zone
-    # ===================================================================
-    # Counts unique orders by exploiting the fact that certain statuses
-    # fire exactly once per order (PLACED at start, CANCELLED terminal).
-    # We can't use countDistinct() because streaming aggregations don't
-    # support it — but summing a status-matching indicator works and is
-    # exact (not approximate).
     print("Starting UC1: Order volume & cancellation rate...")
     uc1 = (
         orders
@@ -135,14 +120,8 @@ def main():
     )
     q1 = parquet_sink(uc1, "uc1_order_volume")
 
-    # ===================================================================
     # UC3 — Peak-hour prep time SLA breaches
-    # ===================================================================
     print("Starting UC3: Prep SLA breaches...")
-    # Breach threshold: 20 min (was 30 min). The simulated restaurants have
-    # avg prep times of 10-30 min, so a 30-min threshold only caught outliers
-    # — which rarely show up in a short demo. 20 min still represents a real
-    # SLA breach but produces enough rows to populate the dashboard.
     uc3 = (
         orders
         .filter(col("is_duplicate") == False)
@@ -169,9 +148,7 @@ def main():
     )
     q3 = parquet_sink(uc3, "uc3_prep_sla")
 
-    # ===================================================================
     # UC4 — Weather impact on delivery times
-    # ===================================================================
     print("Starting UC4: Weather impact...")
     uc4 = (
         orders
@@ -198,9 +175,7 @@ def main():
     )
     q4 = parquet_sink(uc4, "uc4_weather")
 
-    # ===================================================================
     # UC7 — Anomaly detection
-    # ===================================================================
     print("Starting UC7: Anomaly detection...")
     uc7 = (
         couriers
@@ -231,9 +206,7 @@ def main():
     )
     q7 = parquet_sink(uc7, "uc7_anomalies")
 
-    # ===================================================================
     # UC9 — Supply vs demand (stream-stream join)
-    # ===================================================================
     print("Starting UC9: Supply vs demand...")
     demand = (
         deserialize_orders(raw_orders_4)
@@ -265,14 +238,7 @@ def main():
     )
     q9 = parquet_sink(uc9, "uc9_supply_demand")
 
-    # ===================================================================
     # UC10 — Avg prep time per zone
-    # ===================================================================
-    # Originally a PLACED→PICKED_UP stream-stream join, but append-mode
-    # joins hold state until the watermark crosses the join interval,
-    # making the first output land many minutes late. For a live demo we
-    # pivot to a single-stream aggregation over `actual_prep_time_seconds`
-    # on READY_FOR_PICKUP events. Same "processing time" intuition, no join.
     print("Starting UC10: Avg prep time per zone...")
     uc10 = (
         deserialize_orders(raw_orders_2)
@@ -298,9 +264,7 @@ def main():
     )
     q10 = parquet_sink(uc10, "uc10_processing_time")
 
-    # ===================================================================
     # UC11 — Avg order value per zone
-    # ===================================================================
     print("Starting UC11: Avg order value...")
     uc11 = (
         orders
@@ -328,21 +292,7 @@ def main():
     )
     q11 = parquet_sink(uc11, "uc11_order_value")
 
-    # ===================================================================
     # UC12 — Estimated ETA by zone × weather (the platform's promise)
-    # ===================================================================
-    # Business question: "What delivery time does our ETA model promise
-    # customers, broken down by zone and weather?"
-    #
-    # Originally attempted as an actual-vs-estimated stream-stream join,
-    # but `estimated_delivery_time_seconds` is only populated on the PLACED
-    # event (per the generator contract), so join with DELIVERED would need
-    # ~10-min state retention — too slow for the demo's append-mode sink.
-    #
-    # Pivot: aggregate the estimate at PLACED time directly. The dashboard
-    # can compare this side-by-side with UC6 (actual delivery by weather)
-    # to spot systematic over/underestimation — same business insight via
-    # two single-stream queries instead of one expensive join.
     print("Starting UC12: Estimated ETA by zone × weather...")
     uc12 = (
         orders
@@ -372,25 +322,7 @@ def main():
     )
     q12 = parquet_sink(uc12, "uc12_eta_accuracy")
 
-    # ===================================================================
     # UC13 — Courier productivity by vehicle type × zone
-    # ===================================================================
-    # Business question: "Which vehicle type is most productive in each
-    # zone, and what's the distribution of deliveries per session?"
-    #
-    # The courier stream emits status events with `shift_duration_seconds`
-    # (shift length so far) and `deliveries_completed_in_session` (running
-    # count). We take the MAX of both per session — representing the final
-    # tally at session end — then aggregate across sessions within each
-    # (zone, vehicle_type) bucket.
-    #
-    # Emits:
-    #   - session_count        : distinct sessions observed
-    #   - avg_deliveries       : mean deliveries per session
-    #   - p50_deliveries       : median (robust to outliers)
-    #   - p90_deliveries       : top decile
-    #   - avg_shift_minutes
-    #   - deliveries_per_hour  : overall productivity metric
     print("Starting UC13: Courier productivity by vehicle × zone...")
     session_finals = (
         couriers
@@ -398,7 +330,6 @@ def main():
         .filter(col("shift_duration_seconds").isNotNull())
         .filter(col("deliveries_completed_in_session").isNotNull())
         .withWatermark("event_timestamp", "30 seconds")
-        # Aggregate per-session: max values represent the session's final state
         .groupBy(
             window(col("event_timestamp"), "1 minute"),
             col("zone_id"), col("vehicle_type"), col("session_id"),
@@ -410,7 +341,6 @@ def main():
     )
     uc13 = (
         session_finals
-        # Roll up across sessions within each (zone, vehicle_type) bucket
         .groupBy(col("window"), col("zone_id"), col("vehicle_type"))
         .agg(
             count("*").alias("session_count"),
@@ -438,9 +368,7 @@ def main():
     )
     q13 = parquet_sink(uc13, "uc13_courier_productivity")
 
-    # ===================================================================
     # Wait for all queries
-    # ===================================================================
     queries = [q1, q3, q4, q7, q9, q10, q11, q12, q13]
     print(f"\n✓ All {len(queries)} streaming queries started!")
     print(f"  Parquet outputs → {OUTPUT_BASE}")
