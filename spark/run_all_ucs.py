@@ -329,34 +329,26 @@ def main():
     q11 = parquet_sink(uc11, "uc11_order_value")
 
     # ===================================================================
-    # UC12 — ETA prediction accuracy by zone × weather
+    # UC12 — Estimated ETA by zone × weather (the platform's promise)
     # ===================================================================
-    # Business question: "How well does our delivery-time estimator perform,
-    # and do specific weather conditions systematically break it?"
+    # Business question: "What delivery time does our ETA model promise
+    # customers, broken down by zone and weather?"
     #
-    # For every DELIVERED event where both estimated and actual delivery
-    # times are known, compute the prediction error. Group by zone AND
-    # weather so we can see combined effects (e.g. "zone_downtown in
-    # HEAVY_RAIN: we consistently underestimate by 4 minutes").
+    # Originally attempted as an actual-vs-estimated stream-stream join,
+    # but `estimated_delivery_time_seconds` is only populated on the PLACED
+    # event (per the generator contract), so join with DELIVERED would need
+    # ~10-min state retention — too slow for the demo's append-mode sink.
     #
-    # Emits:
-    #   - order_count      : sample size
-    #   - mean_error_sec   : signed bias (positive = we underestimated)
-    #   - mae_sec          : mean absolute error (unsigned accuracy)
-    #   - p90_abs_error    : 90th percentile absolute error (tail risk)
-    #   - underest_rate_pct: % of orders where actual > estimated
-    print("Starting UC12: ETA accuracy by zone × weather...")
+    # Pivot: aggregate the estimate at PLACED time directly. The dashboard
+    # can compare this side-by-side with UC6 (actual delivery by weather)
+    # to spot systematic over/underestimation — same business insight via
+    # two single-stream queries instead of one expensive join.
+    print("Starting UC12: Estimated ETA by zone × weather...")
     uc12 = (
         orders
         .filter(col("is_duplicate") == False)
-        .filter(col("order_status") == "DELIVERED")
-        .filter(col("actual_delivery_time_seconds").isNotNull())
+        .filter(col("order_status") == "PLACED")
         .filter(col("estimated_delivery_time_seconds").isNotNull())
-        .withColumn("error_sec",
-                    col("actual_delivery_time_seconds") - col("estimated_delivery_time_seconds"))
-        .withColumn("abs_error_sec",
-                    when(col("error_sec") < 0, -col("error_sec")).otherwise(col("error_sec")))
-        .withColumn("underestimated", when(col("error_sec") > 0, 1).otherwise(0))
         .withWatermark("event_timestamp", "30 seconds")
         .groupBy(
             window(col("event_timestamp"), "1 minute"),
@@ -364,21 +356,18 @@ def main():
         )
         .agg(
             count("*").alias("order_count"),
-            _round(avg("error_sec"), 0).alias("mean_error_sec"),
-            _round(avg("abs_error_sec"), 0).alias("mae_sec"),
-            _round(percentile_approx("abs_error_sec", 0.9), 0).alias("p90_abs_error"),
-            _sum("underestimated").alias("underestimated_count"),
+            _round(avg("estimated_delivery_time_seconds"), 0).alias("avg_eta_sec"),
+            _min("estimated_delivery_time_seconds").alias("min_eta_sec"),
+            _max("estimated_delivery_time_seconds").alias("max_eta_sec"),
+            _round(percentile_approx("estimated_delivery_time_seconds", 0.9), 0).alias("p90_eta_sec"),
         )
-        .withColumn("underest_rate_pct",
-                    when(col("order_count") == 0, 0.0)
-                    .otherwise(_round(col("underestimated_count") / col("order_count") * 100, 1)))
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
             to_date(col("window.start")).alias("window_date"),
             col("zone_id"), col("weather_condition"),
-            col("order_count"), col("mean_error_sec"), col("mae_sec"),
-            col("p90_abs_error"), col("underest_rate_pct"),
+            col("order_count"), col("avg_eta_sec"),
+            col("min_eta_sec"), col("max_eta_sec"), col("p90_eta_sec"),
         )
     )
     q12 = parquet_sink(uc12, "uc12_eta_accuracy")
