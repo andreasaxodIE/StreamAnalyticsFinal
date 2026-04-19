@@ -7,31 +7,17 @@ SETUP:
   3. NEVER commit eventhub_config.py — it's in .gitignore.
 """
 
-# ---------------------------------------------------------------------------
 # Azure Event Hub Namespace (Group 09, BBADBA A)
-# ---------------------------------------------------------------------------
 EVENT_HUB_NAMESPACE = "iesstsabbadbaa-grp-06-10"
 
-# ---------------------------------------------------------------------------
 # Topic names (Event Hub Instances)
-# ---------------------------------------------------------------------------
 ORDERS_TOPIC = "group_09_orders"
 COURIERS_TOPIC = "group_09_couriers"
 
-# ---------------------------------------------------------------------------
-# Connection strings
-#   Azure Portal → Event Hubs Namespace → Shared access policies
-#   → RootManageSharedAccessKey → Connection string – primary key
-#
-#   It looks like:
-#   Endpoint=sb://iesstsabbadbaa-grp-06-10.servicebus.windows.net/;
-#   SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=xxxxx
-# ---------------------------------------------------------------------------
+
 EVENTHUB_CONNECTION_STR = "Endpoint=sb://iesstsabbadbaa-grp-06-10.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=2GZJc3vlo2ksPr+vu44pSrbhOeCkQR0Vc+AEhM+iPn4="
 
-# ---------------------------------------------------------------------------
 # Kafka-compatible bootstrap server (derived — don't change)
-# ---------------------------------------------------------------------------
 KAFKA_BOOTSTRAP_SERVERS = f"{EVENT_HUB_NAMESPACE}.servicebus.windows.net:9093"
 
 # SASL/SSL config for Kafka clients
