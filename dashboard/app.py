@@ -24,20 +24,15 @@ import time
 import pandas as pd
 import streamlit as st
 
-# Import hard-coded Azure credentials from spark_session.py
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "spark"))
-from spark_session import (  # noqa: E402
+from spark_session import (  
     AZURE_OUTPUT_PATH,
     AZURE_STORAGE_ACCOUNT,
     AZURE_STORAGE_ACCOUNT_KEY,
 )
 
-# ---------------------------------------------------------------------------
 # Config
-# ---------------------------------------------------------------------------
-# Default to the hard-coded Azure path. Override with OUTPUT_BASE=./output_parquet
-# for local mode.
 OUTPUT_BASE = os.environ.get("OUTPUT_BASE", AZURE_OUTPUT_PATH)
 USING_AZURE = OUTPUT_BASE.startswith(("abfss://", "wasbs://"))
 
@@ -56,8 +51,6 @@ def _azure_storage_options():
     }
 
 
-# Translate the old CSV filenames the dashboard uses into parquet
-# dataset directories produced by run_all_ucs.py.
 _CSV_TO_PARQUET = {
     "uc1_order_volume.csv":     "uc1_order_volume",
     "uc3_prep_sla.csv":         "uc3_prep_sla",
@@ -84,12 +77,10 @@ def load_csv(filename):
 
     try:
         if USING_AZURE:
-            # adlfs handles abfss:// via fsspec
             df = pd.read_parquet(path, storage_options=_azure_storage_options())
         else:
             if not os.path.isdir(path):
                 return None
-            # Any .parquet files yet?
             has_data = any(
                 f.endswith(".parquet")
                 for _, _, files in os.walk(path)
@@ -104,9 +95,6 @@ def load_csv(filename):
     return df if len(df) > 0 else None
 
 
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
 st.title("🚴 Real-Time Food Delivery Analytics")
 st.caption("Group 09 — BBADBA A | Streaming from Azure Event Hub → Spark → Dashboard")
 st.caption(f"Reading Parquet from: `{OUTPUT_BASE}`" + (" (Azure)" if USING_AZURE else " (local)"))
@@ -115,9 +103,7 @@ st.divider()
 st.subheader("Orders")
 st.caption("How the platform is performing on order intake, value, and cancellation behaviour.")
 
-# ---------------------------------------------------------------------------
-# UC1 — Order Volume & Cancellation Rate (was UC1)
-# ---------------------------------------------------------------------------
+# UC1 — Order Volume & Cancellation Rate 
 st.header("UC1 — Order volume & cancellation rate by zone")
 st.caption(
     "Counts distinct orders per 1-minute window per zone, and tracks the "
@@ -128,7 +114,6 @@ df1 = load_csv("uc1_order_volume.csv")
 if df1 is not None and len(df1) > 0:
     total_orders    = int(df1["total_orders"].sum())
     total_cancelled = int(df1["cancelled_orders"].sum())
-    # Compute rate from totals, not average-of-rates (avoids Simpson's paradox).
     overall_rate = (total_cancelled / total_orders * 100) if total_orders else 0.0
 
     col1, col2, col3 = st.columns(3)
@@ -151,9 +136,7 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# UC2 — Order value & revenue (was UC11)
-# ---------------------------------------------------------------------------
+# UC2 — Order value & revenue 
 st.header("UC2 — Order value & revenue by zone")
 st.caption(
     "Tracks average basket size and cumulative revenue per zone. "
@@ -188,15 +171,10 @@ else:
 
 st.divider()
 
-# ===========================================================================
-# Operations section
-# ===========================================================================
 st.subheader("Operations")
 st.caption("Supply, demand, and time-to-prep — the operational health of fulfilment.")
 
-# ---------------------------------------------------------------------------
-# UC3 — Supply vs demand (was UC9)
-# ---------------------------------------------------------------------------
+# UC3 — Supply vs demand 
 st.header("UC3 — Supply vs demand imbalance by zone")
 st.caption(
     "Joins placed orders against idle couriers per 1-minute window. "
@@ -205,8 +183,6 @@ st.caption(
 )
 df3 = load_csv("uc9_supply_demand.csv")
 if df3 is not None and len(df3) > 0:
-    # Latest-window snapshot: summing courier counts across windows would
-    # double-count the same couriers.
     latest = (
         df3.sort_values("window_start")
            .groupby("zone_id").tail(1).set_index("zone_id")
@@ -230,9 +206,7 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# UC4 — Avg prep time per zone (was UC10)
-# ---------------------------------------------------------------------------
+# UC4 — Avg prep time per zone 
 st.header("UC4 — Average prep time per zone")
 st.caption(
     "Average time restaurants take to prepare orders, by zone. "
@@ -259,9 +233,7 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# UC5 — SLA Breaches (was UC3)
-# ---------------------------------------------------------------------------
+# UC5 — SLA Breaches 
 st.header("UC5 — Prep-time SLA breaches")
 st.caption(
     "Flags orders where prep time exceeded 20 minutes — a real SLA breach — "
@@ -293,15 +265,11 @@ else:
 
 st.divider()
 
-# ===========================================================================
 # Quality section
-# ===========================================================================
 st.subheader("Quality")
 st.caption("Delivery-time performance and the accuracy of the platform's own predictions.")
 
-# ---------------------------------------------------------------------------
-# UC6 — Weather Impact (was UC4)
-# ---------------------------------------------------------------------------
+# UC6 — Weather Impact 
 st.header("UC6 — Weather impact on delivery times")
 st.caption(
     "Breaks down delivery time by weather condition. "
@@ -309,9 +277,7 @@ st.caption(
 )
 df6 = load_csv("uc4_weather.csv")
 if df6 is not None and len(df6) > 0:
-    # Weight per-window averages by order_count. Simple .mean() would let a
-    # 1-order SNOW window count the same as a 50-order CLEAR window, making
-    # rare-weather results very noisy.
+    
     def _wavg(group, val_col, weight_col="order_count"):
         w = group[weight_col]
         if w.sum() == 0:
@@ -355,9 +321,7 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# UC7 — ETA prediction accuracy (was UC12)
-# ---------------------------------------------------------------------------
+# UC7 — ETA prediction accuracy 
 st.header("UC7 — Estimated ETA by zone × weather")
 st.caption(
     "Shows the delivery time the platform's ETA model *promises* customers, "
@@ -367,8 +331,7 @@ st.caption(
 )
 df7 = load_csv("uc12_eta_accuracy.csv")
 if df7 is not None and len(df7) > 0:
-    # Weighted aggregation — each window contributes proportionally to its
-    # order count, so sparse-weather rows don't dominate.
+    
     def _weighted(group, val_col, weight_col="order_count"):
         w = group[weight_col]
         if w.sum() == 0:
@@ -395,7 +358,6 @@ if df7 is not None and len(df7) > 0:
     col2.metric("Overall avg ETA", f"{overall_avg:.0f}s")
     col3.metric("Overall P90 ETA", f"{overall_p90:.0f}s")
 
-    # Pivot for grouped bar chart: rows=weather, columns=zone
     eta_pivot = summary.pivot_table(
         index="weather_condition", columns="zone_id",
         values="avg_eta_sec", aggfunc="mean",
@@ -417,15 +379,11 @@ else:
 
 st.divider()
 
-# ===========================================================================
 # Fleet section
-# ===========================================================================
 st.subheader("Fleet")
 st.caption("Courier telemetry — anomalies, productivity, vehicle mix.")
 
-# ---------------------------------------------------------------------------
-# UC8 — Courier anomaly detection (was UC7)
-# ---------------------------------------------------------------------------
+# UC8 — Courier anomaly detection 
 st.header("UC8 — Courier anomaly detection")
 st.caption(
     "Scans courier GPS and status events for impossible speeds, sudden "
@@ -469,9 +427,7 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# UC9 — Courier Productivity (was UC13)
-# ---------------------------------------------------------------------------
+# UC9 — Courier Productivity 
 st.header("UC9 — Courier productivity (vehicle type × zone)")
 st.caption(
     "Two-stage aggregation: takes each courier session's final delivery "
@@ -515,9 +471,8 @@ if df9 is not None and len(df9) > 0:
 else:
     st.info("Waiting for UC9 data...")
 
-# ---------------------------------------------------------------------------
+
 # Auto-refresh
-# ---------------------------------------------------------------------------
 st.divider()
 st.caption(f"Last refreshed: {time.strftime('%H:%M:%S')} | Auto-refreshes every 5 seconds")
 time.sleep(5)
