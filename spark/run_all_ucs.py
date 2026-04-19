@@ -329,9 +329,130 @@ def main():
     q11 = parquet_sink(uc11, "uc11_order_value")
 
     # ===================================================================
+    # UC12 — ETA prediction accuracy by zone × weather
+    # ===================================================================
+    # Business question: "How well does our delivery-time estimator perform,
+    # and do specific weather conditions systematically break it?"
+    #
+    # For every DELIVERED event where both estimated and actual delivery
+    # times are known, compute the prediction error. Group by zone AND
+    # weather so we can see combined effects (e.g. "zone_downtown in
+    # HEAVY_RAIN: we consistently underestimate by 4 minutes").
+    #
+    # Emits:
+    #   - order_count      : sample size
+    #   - mean_error_sec   : signed bias (positive = we underestimated)
+    #   - mae_sec          : mean absolute error (unsigned accuracy)
+    #   - p90_abs_error    : 90th percentile absolute error (tail risk)
+    #   - underest_rate_pct: % of orders where actual > estimated
+    print("Starting UC12: ETA accuracy by zone × weather...")
+    uc12 = (
+        orders
+        .filter(col("is_duplicate") == False)
+        .filter(col("order_status") == "DELIVERED")
+        .filter(col("actual_delivery_time_seconds").isNotNull())
+        .filter(col("estimated_delivery_time_seconds").isNotNull())
+        .withColumn("error_sec",
+                    col("actual_delivery_time_seconds") - col("estimated_delivery_time_seconds"))
+        .withColumn("abs_error_sec",
+                    when(col("error_sec") < 0, -col("error_sec")).otherwise(col("error_sec")))
+        .withColumn("underestimated", when(col("error_sec") > 0, 1).otherwise(0))
+        .withWatermark("event_timestamp", "30 seconds")
+        .groupBy(
+            window(col("event_timestamp"), "1 minute"),
+            col("zone_id"), col("weather_condition"),
+        )
+        .agg(
+            count("*").alias("order_count"),
+            _round(avg("error_sec"), 0).alias("mean_error_sec"),
+            _round(avg("abs_error_sec"), 0).alias("mae_sec"),
+            _round(percentile_approx("abs_error_sec", 0.9), 0).alias("p90_abs_error"),
+            _sum("underestimated").alias("underestimated_count"),
+        )
+        .withColumn("underest_rate_pct",
+                    when(col("order_count") == 0, 0.0)
+                    .otherwise(_round(col("underestimated_count") / col("order_count") * 100, 1)))
+        .select(
+            col("window.start").alias("window_start"),
+            col("window.end").alias("window_end"),
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("weather_condition"),
+            col("order_count"), col("mean_error_sec"), col("mae_sec"),
+            col("p90_abs_error"), col("underest_rate_pct"),
+        )
+    )
+    q12 = parquet_sink(uc12, "uc12_eta_accuracy")
+
+    # ===================================================================
+    # UC13 — Courier productivity by vehicle type × zone
+    # ===================================================================
+    # Business question: "Which vehicle type is most productive in each
+    # zone, and what's the distribution of deliveries per session?"
+    #
+    # The courier stream emits status events with `shift_duration_seconds`
+    # (shift length so far) and `deliveries_completed_in_session` (running
+    # count). We take the MAX of both per session — representing the final
+    # tally at session end — then aggregate across sessions within each
+    # (zone, vehicle_type) bucket.
+    #
+    # Emits:
+    #   - session_count        : distinct sessions observed
+    #   - avg_deliveries       : mean deliveries per session
+    #   - p50_deliveries       : median (robust to outliers)
+    #   - p90_deliveries       : top decile
+    #   - avg_shift_minutes
+    #   - deliveries_per_hour  : overall productivity metric
+    print("Starting UC13: Courier productivity by vehicle × zone...")
+    session_finals = (
+        couriers
+        .filter(col("is_duplicate") == False)
+        .filter(col("shift_duration_seconds").isNotNull())
+        .filter(col("deliveries_completed_in_session").isNotNull())
+        .withWatermark("event_timestamp", "30 seconds")
+        # Aggregate per-session: max values represent the session's final state
+        .groupBy(
+            window(col("event_timestamp"), "1 minute"),
+            col("zone_id"), col("vehicle_type"), col("session_id"),
+        )
+        .agg(
+            _max("deliveries_completed_in_session").alias("session_deliveries"),
+            _max("shift_duration_seconds").alias("session_shift_sec"),
+        )
+    )
+    uc13 = (
+        session_finals
+        # Roll up across sessions within each (zone, vehicle_type) bucket
+        .groupBy(col("window"), col("zone_id"), col("vehicle_type"))
+        .agg(
+            count("*").alias("session_count"),
+            _round(avg("session_deliveries"), 2).alias("avg_deliveries"),
+            percentile_approx("session_deliveries", 0.5).alias("p50_deliveries"),
+            percentile_approx("session_deliveries", 0.9).alias("p90_deliveries"),
+            _round(avg("session_shift_sec") / 60, 1).alias("avg_shift_minutes"),
+            _sum("session_deliveries").alias("total_deliveries"),
+            _sum("session_shift_sec").alias("total_shift_sec"),
+        )
+        .withColumn(
+            "deliveries_per_hour",
+            when(col("total_shift_sec") == 0, 0.0)
+            .otherwise(_round(col("total_deliveries") * 3600 / col("total_shift_sec"), 2)),
+        )
+        .select(
+            col("window.start").alias("window_start"),
+            col("window.end").alias("window_end"),
+            to_date(col("window.start")).alias("window_date"),
+            col("zone_id"), col("vehicle_type"),
+            col("session_count"), col("avg_deliveries"),
+            col("p50_deliveries"), col("p90_deliveries"),
+            col("avg_shift_minutes"), col("deliveries_per_hour"),
+        )
+    )
+    q13 = parquet_sink(uc13, "uc13_courier_productivity")
+
+    # ===================================================================
     # Wait for all queries
     # ===================================================================
-    queries = [q1, q3, q4, q7, q9, q10, q11]
+    queries = [q1, q3, q4, q7, q9, q10, q11, q12, q13]
     print(f"\n✓ All {len(queries)} streaming queries started!")
     print(f"  Parquet outputs → {OUTPUT_BASE}")
     print(f"  Press Ctrl+C to stop.\n")
