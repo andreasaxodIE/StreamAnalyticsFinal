@@ -309,11 +309,25 @@ st.caption(
 )
 df6 = load_csv("uc4_weather.csv")
 if df6 is not None and len(df6) > 0:
-    weather_summary = df6.groupby("weather_condition").agg({
-        "order_count": "sum",
-        "avg_delivery_sec": "mean",
-        "p95_delivery_sec": "mean",
-    }).round(0)
+    # Weight per-window averages by order_count. Simple .mean() would let a
+    # 1-order SNOW window count the same as a 50-order CLEAR window, making
+    # rare-weather results very noisy.
+    def _wavg(group, val_col, weight_col="order_count"):
+        w = group[weight_col]
+        if w.sum() == 0:
+            return 0.0
+        return (group[val_col] * w).sum() / w.sum()
+
+    weather_summary = (
+        df6.groupby("weather_condition")
+           .apply(lambda g: pd.Series({
+               "order_count":       int(g["order_count"].sum()),
+               "avg_delivery_sec":  round(_wavg(g, "avg_delivery_sec"), 0),
+               "p95_delivery_sec":  round(_wavg(g, "p95_delivery_sec"), 0),
+           }), include_groups=False)
+           .reindex(["CLEAR", "RAIN", "HEAVY_RAIN", "SNOW"])
+           .dropna()
+    )
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -322,7 +336,20 @@ if df6 is not None and len(df6) > 0:
     with col_b:
         st.markdown("**P95 delivery time by weather (seconds)**")
         st.bar_chart(weather_summary["p95_delivery_sec"])
-    st.caption("P95 shows the tail — the worst 5% of deliveries under each condition.")
+
+    st.caption(
+        "Averages are weighted by order volume per window. "
+        "Each delivery's actual time is drawn from a distribution, so with "
+        "small sample sizes (short demos) a weather bucket can occasionally "
+        "look faster than it really is. As the demo runs longer, you should "
+        "see CLEAR < RAIN < HEAVY_RAIN < SNOW emerge in the avg delivery bars "
+        "— matching the weather multipliers in the generator (1.0 / 1.2 / 1.45 / 1.6)."
+    )
+    st.markdown("**Sample sizes**")
+    st.dataframe(
+        weather_summary.reset_index(),
+        use_container_width=True, hide_index=True,
+    )
 else:
     st.info("Waiting for UC6 data...")
 
@@ -331,14 +358,17 @@ st.divider()
 # ---------------------------------------------------------------------------
 # UC7 — ETA prediction accuracy (was UC12)
 # ---------------------------------------------------------------------------
-st.header("UC7 — ETA prediction accuracy (zone × weather)")
+st.header("UC7 — Estimated ETA by zone × weather")
 st.caption(
-    "Compares the platform's *estimated* delivery time against the "
-    "*actual* delivery time, broken down by zone and weather. "
-    "Answers: *where and when do our own ETA promises break down?*"
+    "Shows the delivery time the platform's ETA model *promises* customers, "
+    "broken down by zone and weather condition. "
+    "Answers: *what delivery times are we advertising, and how does the "
+    "model react to weather?* Compare with UC6 to spot overconfidence."
 )
 df7 = load_csv("uc12_eta_accuracy.csv")
 if df7 is not None and len(df7) > 0:
+    # Weighted aggregation — each window contributes proportionally to its
+    # order count, so sparse-weather rows don't dominate.
     def _weighted(group, val_col, weight_col="order_count"):
         w = group[weight_col]
         if w.sum() == 0:
@@ -348,39 +378,39 @@ if df7 is not None and len(df7) > 0:
     summary = (
         df7.groupby(["zone_id", "weather_condition"])
             .apply(lambda g: pd.Series({
-                "order_count":        int(g["order_count"].sum()),
-                "mean_error_sec":     round(_weighted(g, "mean_error_sec"), 0),
-                "mae_sec":            round(_weighted(g, "mae_sec"), 0),
-                "underest_rate_pct":  round(_weighted(g, "underest_rate_pct"), 1),
+                "order_count":  int(g["order_count"].sum()),
+                "avg_eta_sec":  round(_weighted(g, "avg_eta_sec"), 0),
+                "p90_eta_sec":  round(_weighted(g, "p90_eta_sec"), 0),
             }), include_groups=False)
             .reset_index()
-            .sort_values("mae_sec", ascending=False)
+            .sort_values("avg_eta_sec", ascending=False)
     )
 
-    total_orders      = int(df7["order_count"].sum())
-    overall_mae       = round(_weighted(df7, "mae_sec"), 0)
-    overall_underest  = round(_weighted(df7, "underest_rate_pct"), 1)
+    total_orders = int(df7["order_count"].sum())
+    overall_avg  = round(_weighted(df7, "avg_eta_sec"), 0)
+    overall_p90  = round(_weighted(df7, "p90_eta_sec"), 0)
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Deliveries evaluated", total_orders)
-    col2.metric("Overall MAE", f"{overall_mae:.0f}s")
-    col3.metric("Underestimation rate", f"{overall_underest:.1f}%")
+    col1.metric("Orders with ETAs issued", total_orders)
+    col2.metric("Overall avg ETA", f"{overall_avg:.0f}s")
+    col3.metric("Overall P90 ETA", f"{overall_p90:.0f}s")
 
-    # Heatmap-style bar chart: MAE by weather, colored per zone
-    mae_pivot = summary.pivot_table(
+    # Pivot for grouped bar chart: rows=weather, columns=zone
+    eta_pivot = summary.pivot_table(
         index="weather_condition", columns="zone_id",
-        values="mae_sec", aggfunc="mean",
-    )
-    st.markdown("**MAE (seconds) by weather condition and zone**")
-    st.bar_chart(mae_pivot)
+        values="avg_eta_sec", aggfunc="mean",
+    ).reindex(["CLEAR", "RAIN", "HEAVY_RAIN", "SNOW"]).dropna(how="all")
 
-    st.markdown("**Worst combinations — sorted by MAE**")
+    st.markdown("**Promised ETA (seconds) — weather × zone**")
+    st.bar_chart(eta_pivot)
+
+    st.markdown("**Longest promised ETAs — sorted**")
     st.dataframe(summary.head(10), use_container_width=True, hide_index=True)
 
     st.caption(
-        "MAE = mean absolute error. "
-        "Positive mean_error means the platform underestimates delivery time. "
-        "Underest. rate = share of orders that came in slower than promised."
+        "ETAs come from the `estimated_delivery_time_seconds` field, "
+        "computed when the order is PLACED. Bars rising from CLEAR → SNOW "
+        "mean the model is correctly pricing weather risk into its promises."
     )
 else:
     st.info("Waiting for UC7 data...")
