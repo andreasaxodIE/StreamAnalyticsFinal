@@ -28,7 +28,6 @@ import io
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict
 
-# Allow running from any working directory
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import GeneratorConfig
@@ -37,9 +36,7 @@ from courier_generator import CourierFleetGenerator
 from avro_writer import AvroWriter
 
 
-# ---------------------------------------------------------------------------
 # Load schemas
-# ---------------------------------------------------------------------------
 SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "..", "schemas")
 
 def _load_schema(filename: str) -> Dict:
@@ -48,9 +45,7 @@ def _load_schema(filename: str) -> Dict:
         return json.load(f)
 
 
-# ---------------------------------------------------------------------------
 # Output helpers
-# ---------------------------------------------------------------------------
 
 def write_json_lines(events: List[Dict], filepath: str):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -68,9 +63,7 @@ def write_avro(events: List[Dict], schema: Dict, filepath: str):
     print(f"  ✓ AVRO:  {filepath}  ({len(events)} events)")
 
 
-# ---------------------------------------------------------------------------
 # Argument parsing
-# ---------------------------------------------------------------------------
 
 def parse_args():
     p = argparse.ArgumentParser(
@@ -78,7 +71,6 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Scale settings
     p.add_argument("--orders",       type=int,   default=100,  help="Number of orders to simulate")
     p.add_argument("--couriers",     type=int,   default=80,   help="Number of couriers in the fleet")
     p.add_argument("--restaurants",  type=int,   default=50,   help="Number of restaurants")
@@ -87,13 +79,11 @@ def parse_args():
     p.add_argument("--seed",         type=int,   default=42,   help="Random seed for reproducibility")
     p.add_argument("--output-dir",   type=str,   default="./sample_data", help="Output directory")
 
-    # Edge case rates
     p.add_argument("--late-rate",        type=float, default=0.05, help="Late arrival event fraction")
     p.add_argument("--duplicate-rate",   type=float, default=0.02, help="Duplicate event fraction")
     p.add_argument("--cancel-rate",      type=float, default=0.12, help="Order cancellation probability")
     p.add_argument("--anomaly-rate",     type=float, default=0.02, help="Impossible-duration fraction")
 
-    # Demand surge
     p.add_argument("--surge",            action="store_true",          help="Enable demand surge")
     p.add_argument("--surge-zone",       type=str, default="zone_downtown")
     p.add_argument("--surge-multiplier", type=float, default=3.0)
@@ -102,11 +92,8 @@ def parse_args():
 
 
 def main():
-    # Parse CLI args first so the run is configurable
     args = parse_args()
 
-    # Build a config object that all generators use.
-    # Keeps the parameters centralized and easy to pass around.
     cfg = GeneratorConfig(
         num_restaurants=args.restaurants,
         num_couriers=args.couriers,
@@ -123,7 +110,6 @@ def main():
         random_seed=args.seed,
     )
 
-    # Base timestamp: simulate yesterday's lunch peak (noon)
     now = datetime.now(timezone.utc)
     sim_start = datetime(now.year, now.month, now.day, 11, 0, 0, tzinfo=timezone.utc) - timedelta(days=1)
     start_ts_ms = int(sim_start.timestamp() * 1000)
@@ -141,11 +127,9 @@ def main():
     print(f"  Output directory : {args.output_dir}")
     print(f"{'='*60}\n")
 
-    # Load schemas
     order_schema   = _load_schema("order_lifecycle_event.avsc")
     courier_schema = _load_schema("courier_status_event.avsc")
 
-    # Feed 1: Order Lifecycle Events
     print("Generating Feed 1: Order Lifecycle Events ...")
     order_gen = OrderEventGenerator(cfg)
     order_events = list(order_gen.stream(start_ts_ms, n_orders=args.orders))
@@ -155,7 +139,6 @@ def main():
     write_json_lines(order_events, os.path.join(out_dir, "order_lifecycle_events.jsonl"))
     write_avro(order_events, order_schema, os.path.join(out_dir, "order_lifecycle_events.avro"))
 
-    # Feed 2: Courier Status Events
     print("\nGenerating Feed 2: Courier Status Events ...")
     courier_gen = CourierFleetGenerator(cfg)
     courier_events = list(courier_gen.stream(start_ts_ms))
@@ -164,7 +147,6 @@ def main():
     write_json_lines(courier_events, os.path.join(out_dir, "courier_status_events.jsonl"))
     write_avro(courier_events, courier_schema, os.path.join(out_dir, "courier_status_events.avro"))
 
-    # Summary statistics
     print(f"\n{'='*60}")
     print("  Summary Statistics")
     print(f"{'='*60}")
