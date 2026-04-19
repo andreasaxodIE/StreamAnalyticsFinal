@@ -89,8 +89,7 @@ StreamAnalyticsFinal-main/
 |   `-- eventhub_producer.py
 |-- spark/
 |   |-- run_all_ucs.py
-|   |-- spark_session.py
-|   `-- uc*.py
+|   `-- spark_session.py
 |-- dashboard/
 |   `-- app.py
 |-- settings/
