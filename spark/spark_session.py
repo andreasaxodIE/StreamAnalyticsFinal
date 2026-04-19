@@ -12,29 +12,18 @@ Provides:
 import os
 import sys
 
-# ---------------------------------------------------------------------------
 # Azure Storage configuration (hard-coded for demo)
-# ---------------------------------------------------------------------------
-# Fill these in once. The rest of the pipeline (run_all_ucs.py, dashboard/app.py)
-# imports from here so you only edit credentials in one place.
-#
-# SECURITY: do NOT commit this file to a public repo with real values. After
-# the demo, rotate the key in Azure Portal → Storage account → Access keys.
+
 AZURE_STORAGE_ACCOUNT = "iesstsabbadbaa"
 AZURE_STORAGE_ACCOUNT_KEY = "GfD8mpJmqw6gTqzyRpmV5tbHZ7RP1xkiO9X9hgmaMTdnHL1PL62AVmlejOmhHPFkBr2Pfl9DvmUC+AStYJXlzA=="
 AZURE_CONTAINER = "streaming9"
-# Path prefix inside the container. You can change "runs/demo" to anything.
 AZURE_OUTPUT_PATH = f"abfss://{AZURE_CONTAINER}@{AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/runs/demo"
 
-# Env vars still override — useful if you ever want to point at a different
-# account without editing this file.
 AZURE_STORAGE_ACCOUNT = os.environ.get("AZURE_STORAGE_ACCOUNT", AZURE_STORAGE_ACCOUNT)
 AZURE_STORAGE_ACCOUNT_KEY = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY", AZURE_STORAGE_ACCOUNT_KEY)
 AZURE_OUTPUT_PATH = os.environ.get("OUTPUT_BASE", AZURE_OUTPUT_PATH)
 
-# ---------------------------------------------------------------------------
 # Path setup
-# ---------------------------------------------------------------------------
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 SCHEMA_DIR = os.path.join(REPO_ROOT, "schemas")
@@ -51,9 +40,7 @@ except ImportError:
     sys.exit(1)
 
 
-# ---------------------------------------------------------------------------
 # Load AVRO schemas as JSON strings (required by from_avro)
-# ---------------------------------------------------------------------------
 def _load_schema_str(filename: str) -> str:
     path = os.path.join(SCHEMA_DIR, filename)
     with open(path, "r", encoding="utf-8") as f:
@@ -64,9 +51,7 @@ ORDER_AVRO_SCHEMA = _load_schema_str("order_lifecycle_event.avsc")
 COURIER_AVRO_SCHEMA = _load_schema_str("courier_status_event.avsc")
 
 
-# ---------------------------------------------------------------------------
 # Spark session factory
-# ---------------------------------------------------------------------------
 def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
     """
     Create a SparkSession configured for Azure Event Hub (Kafka protocol).
@@ -83,14 +68,11 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
             with open(winutils_path, "w", encoding="utf-8") as f:
                 f.write("")
 
-    # Fixed connector versions to avoid the Spark 4.0 class mismatch error
     jar_list = [
         "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.2",
         "org.apache.spark:spark-avro_2.13:4.0.2",
     ]
 
-    # Add Azure Blob / ADLS Gen2 connectors when writing to abfss:// paths.
-    # Matching versions for Spark 4.0 / Hadoop 3.4.
     using_azure = AZURE_OUTPUT_PATH.startswith(("abfss://", "wasbs://"))
     if using_azure:
         jar_list.extend([
@@ -112,7 +94,6 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
         .config("spark.sql.shuffle.partitions", "4")
     )
 
-    # Azure Storage auth via SharedKey (credentials set at top of this file).
     if using_azure:
         if (AZURE_STORAGE_ACCOUNT.startswith("YOUR_") or
                 AZURE_STORAGE_ACCOUNT_KEY.startswith("YOUR_")):
@@ -148,9 +129,7 @@ def create_spark_session(app_name: str = "FoodDeliveryStreaming"):
     return spark
 
 
-# ---------------------------------------------------------------------------
 # Stream readers
-# ---------------------------------------------------------------------------
 def _kafka_read_config(topic: str) -> dict:
     conf = dict(SPARK_KAFKA_CONFIG)
     conf["subscribe"] = topic
@@ -179,9 +158,7 @@ def read_couriers_stream(spark):
     )
 
 
-# ---------------------------------------------------------------------------
 # AVRO deserialization helpers
-# ---------------------------------------------------------------------------
 def deserialize_orders(df):
     from pyspark.sql.avro.functions import from_avro
     from pyspark.sql.functions import col
