@@ -215,13 +215,14 @@ class GeneratorConfig:
     # These rates introduce imperfect or edge-case behaviour into the data.
     # This is useful for testing analytics pipelines and checking whether
     # downstream systems can handle messy real-world situations.
+    # Bumped for short demos so UC3/UC7 have visible activity per batch.
     late_arrival_rate: float = 0.05
     max_late_arrival_seconds: int = 300
     duplicate_rate: float = 0.02
     cancellation_rate: float = 0.12
     missing_step_rate: float = 0.03
-    impossible_duration_rate: float = 0.02
-    courier_offline_mid_delivery_rate: float = 0.015
+    impossible_duration_rate: float = 0.10
+    courier_offline_mid_delivery_rate: float = 0.05
 
     # These values control whether a surge is active.
     # A surge means one specific zone experiences much higher demand than usual.
