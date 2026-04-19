@@ -66,6 +66,8 @@ _CSV_TO_PARQUET = {
     "uc9_supply_demand.csv":    "uc9_supply_demand",
     "uc10_processing_time.csv": "uc10_processing_time",
     "uc11_order_value.csv":     "uc11_order_value",
+    "uc12_eta_accuracy.csv":    "uc12_eta_accuracy",
+    "uc13_courier_productivity.csv": "uc13_courier_productivity",
 }
 
 
@@ -274,6 +276,98 @@ if df11 is not None and len(df11) > 0:
     st.caption("Total revenue accumulates over the demo — it grows with each closed window.")
 else:
     st.info("Waiting for UC11 data...")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# UC12 — ETA Accuracy by zone × weather
+# ---------------------------------------------------------------------------
+st.header("UC12 — ETA prediction accuracy (zone × weather)")
+df12 = load_csv("uc12_eta_accuracy.csv")
+if df12 is not None and len(df12) > 0:
+    # Re-weight by order_count so cells with more orders count proportionally.
+    def _weighted(group, val_col, weight_col="order_count"):
+        w = group[weight_col]
+        if w.sum() == 0:
+            return 0.0
+        return (group[val_col] * w).sum() / w.sum()
+
+    summary = (
+        df12.groupby(["zone_id", "weather_condition"])
+            .apply(lambda g: pd.Series({
+                "order_count":        int(g["order_count"].sum()),
+                "mean_error_sec":     round(_weighted(g, "mean_error_sec"), 0),
+                "mae_sec":            round(_weighted(g, "mae_sec"), 0),
+                "underest_rate_pct":  round(_weighted(g, "underest_rate_pct"), 1),
+            }), include_groups=False)
+            .reset_index()
+            .sort_values("mae_sec", ascending=False)
+    )
+
+    total_orders      = int(df12["order_count"].sum())
+    overall_mae       = round(_weighted(df12, "mae_sec"), 0)
+    overall_underest  = round(_weighted(df12, "underest_rate_pct"), 1)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Deliveries evaluated", total_orders)
+    col2.metric("Overall MAE", f"{overall_mae:.0f}s")
+    col3.metric("Underestimation rate", f"{overall_underest:.1f}%")
+
+    st.subheader("Worst (zone × weather) combinations by MAE")
+    st.dataframe(summary.head(10), use_container_width=True, hide_index=True)
+
+    st.caption(
+        "MAE = mean absolute error (seconds). "
+        "Positive mean_error = platform underestimates delivery time. "
+        "Underest. rate = % of orders where actual delivery was slower than estimate."
+    )
+else:
+    st.info("Waiting for UC12 data...")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# UC13 — Courier Productivity by vehicle × zone
+# ---------------------------------------------------------------------------
+st.header("UC13 — Courier productivity (vehicle type × zone)")
+df13 = load_csv("uc13_courier_productivity.csv")
+if df13 is not None and len(df13) > 0:
+    # Aggregate across all windows — weight productivity by session count.
+    def _wavg(group, val_col, weight_col="session_count"):
+        w = group[weight_col]
+        if w.sum() == 0:
+            return 0.0
+        return (group[val_col] * w).sum() / w.sum()
+
+    rollup = (
+        df13.groupby(["vehicle_type", "zone_id"])
+            .apply(lambda g: pd.Series({
+                "sessions":             int(g["session_count"].sum()),
+                "avg_deliveries":       round(_wavg(g, "avg_deliveries"), 2),
+                "p50_deliveries":       round(g["p50_deliveries"].median(), 1),
+                "p90_deliveries":       round(g["p90_deliveries"].median(), 1),
+                "deliveries_per_hour":  round(_wavg(g, "deliveries_per_hour"), 2),
+            }), include_groups=False)
+            .reset_index()
+    )
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Sessions observed", int(rollup["sessions"].sum()))
+    col2.metric("Avg deliveries/session", f"{_wavg(df13, 'avg_deliveries'):.2f}")
+    col3.metric("Avg deliveries/hour", f"{_wavg(df13, 'deliveries_per_hour'):.2f}")
+
+    # Pivot: productivity heatmap-ish view by vehicle × zone
+    pivot = rollup.pivot(index="zone_id", columns="vehicle_type", values="deliveries_per_hour")
+    st.subheader("Deliveries per hour, by zone × vehicle type")
+    st.bar_chart(pivot)
+
+    st.subheader("Full breakdown")
+    st.dataframe(
+        rollup.sort_values("deliveries_per_hour", ascending=False),
+        use_container_width=True, hide_index=True,
+    )
+else:
+    st.info("Waiting for UC13 data...")
 
 # ---------------------------------------------------------------------------
 # Auto-refresh
