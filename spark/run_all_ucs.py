@@ -151,7 +151,7 @@ def main():
         .filter(col("actual_prep_time_seconds") > 1200)
         .withWatermark("event_timestamp", "30 seconds")
         .groupBy(
-            window(col("event_timestamp"), "2 minutes", "1 minute"),
+            window(col("event_timestamp"), "1 minute"),
             col("zone_id"), col("restaurant_id"), col("is_peak_hour"),
         )
         .agg(
@@ -179,7 +179,7 @@ def main():
         .filter(col("order_status") == "DELIVERED")
         .filter(col("actual_delivery_time_seconds").isNotNull())
         .withWatermark("event_timestamp", "30 seconds")
-        .groupBy(window(col("event_timestamp"), "2 minutes"), col("weather_condition"))
+        .groupBy(window(col("event_timestamp"), "1 minute"), col("weather_condition"))
         .agg(
             count("*").alias("order_count"),
             _round(avg("actual_delivery_time_seconds"), 0).alias("avg_delivery_sec"),
@@ -206,7 +206,7 @@ def main():
         couriers
         .withWatermark("event_timestamp", "30 seconds")
         .groupBy(
-            window(col("event_timestamp"), "2 minutes", "1 minute"),
+            window(col("event_timestamp"), "1 minute"),
             col("zone_id"), col("vehicle_type"),
         )
         .agg(
@@ -266,34 +266,26 @@ def main():
     q9 = parquet_sink(uc9, "uc9_supply_demand")
 
     # ===================================================================
-    # UC10 — Avg processing time (PLACED → PICKED_UP self-join)
+    # UC10 — Avg prep time per zone
     # ===================================================================
-    print("Starting UC10: Avg processing time...")
-    placed = (
+    # Originally a PLACED→PICKED_UP stream-stream join, but append-mode
+    # joins hold state until the watermark crosses the join interval,
+    # making the first output land many minutes late. For a live demo we
+    # pivot to a single-stream aggregation over `actual_prep_time_seconds`
+    # on READY_FOR_PICKUP events. Same "processing time" intuition, no join.
+    print("Starting UC10: Avg prep time per zone...")
+    uc10 = (
         deserialize_orders(raw_orders_2)
         .filter(col("is_duplicate") == False)
-        .filter(col("order_status") == "PLACED")
-        .select(col("order_id"), col("zone_id"), col("event_timestamp").alias("placed_ts"))
-        .withWatermark("placed_ts", "30 seconds")
-    )
-    picked_up = (
-        deserialize_orders(raw_orders_3)
-        .filter(col("is_duplicate") == False)
-        .filter(col("order_status") == "PICKED_UP")
-        .select(col("order_id").alias("pu_order_id"), col("event_timestamp").alias("picked_up_ts"))
-        .withWatermark("picked_up_ts", "30 seconds")
-    )
-    uc10 = (
-        placed.join(picked_up,
-            expr("order_id = pu_order_id AND picked_up_ts >= placed_ts AND picked_up_ts <= placed_ts + interval 15 minutes"),
-            how="inner")
-        .withColumn("processing_time_sec", col("picked_up_ts").cast("long") - col("placed_ts").cast("long"))
-        .groupBy(window(col("placed_ts"), "1 minute"), col("zone_id"))
+        .filter(col("order_status") == "READY_FOR_PICKUP")
+        .filter(col("actual_prep_time_seconds").isNotNull())
+        .withWatermark("event_timestamp", "30 seconds")
+        .groupBy(window(col("event_timestamp"), "1 minute"), col("zone_id"))
         .agg(
             count("*").alias("order_count"),
-            _round(avg("processing_time_sec"), 0).alias("avg_processing_sec"),
-            _min("processing_time_sec").alias("min_processing_sec"),
-            _max("processing_time_sec").alias("max_processing_sec"),
+            _round(avg("actual_prep_time_seconds"), 0).alias("avg_processing_sec"),
+            _min("actual_prep_time_seconds").alias("min_processing_sec"),
+            _max("actual_prep_time_seconds").alias("max_processing_sec"),
         )
         .select(
             col("window.start").alias("window_start"),
