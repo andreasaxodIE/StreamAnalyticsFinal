@@ -17,7 +17,7 @@ from config import (
 
 
 
-# Reference entities ---------------------------------------------------------------------------
+# Reference entities 
 
 def build_restaurants(n: int) -> List[Dict]:
     restaurants = []
@@ -47,9 +47,7 @@ def build_customers(n: int) -> List[Dict]:
 
 
 
-# Order lifecycle builder ---------------------------------------------------------------------------
-# Orders normally transition through these states sequentially, this sequence may later be truncated (cancellation)or modified (missing steps or anomalies).
-
+# Order lifecycle builder 
 FULL_LIFECYCLE = [
     "PLACED",
     "ACCEPTED",
@@ -110,11 +108,9 @@ def _inter_event_delay(from_status: str, to_status: str, anomalous: bool,
 
     base = random.randint(lo, hi)
 
-    # Peak hour: prep takes longer
     if peak and to_status in ("READY_FOR_PICKUP",):
         base = int(base * PEAK_HOUR_PREP_MULTIPLIER)
 
-    # Bad weather: delivery takes longer
     weather_mult = WEATHER_DELIVERY_MULTIPLIER.get(weather, 1.0)
     if to_status == "DELIVERED" and weather_mult > 1.0:
         base = int(base * weather_mult)
@@ -172,7 +168,6 @@ class OrderEventGenerator:
         order_id = f"ord_{uuid.uuid4().hex[:12]}"
         items, total = _sample_order_items(restaurant["cuisine"])
 
-        # Determine context at order placement time
         placed_hour = datetime.fromtimestamp(base_ts_ms / 1000, tz=timezone.utc).hour
         peak = is_peak_hour(placed_hour)
         weather = sample_weather()
@@ -261,7 +256,6 @@ class OrderEventGenerator:
             )
             events.append(event)
 
-            # Courier vanishes mid-delivery
             if courier_vanish and status == "PICKED_UP":
                 oo_event = copy.deepcopy(event)
                 oo_event["event_id"] = str(uuid.uuid4())
