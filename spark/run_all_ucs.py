@@ -139,12 +139,16 @@ def main():
     # UC3 — Peak-hour prep time SLA breaches
     # ===================================================================
     print("Starting UC3: Prep SLA breaches...")
+    # Breach threshold: 20 min (was 30 min). The simulated restaurants have
+    # avg prep times of 10-30 min, so a 30-min threshold only caught outliers
+    # — which rarely show up in a short demo. 20 min still represents a real
+    # SLA breach but produces enough rows to populate the dashboard.
     uc3 = (
         orders
         .filter(col("is_duplicate") == False)
         .filter(col("order_status") == "READY_FOR_PICKUP")
         .filter(col("actual_prep_time_seconds").isNotNull())
-        .filter(col("actual_prep_time_seconds") > 1800)
+        .filter(col("actual_prep_time_seconds") > 1200)
         .withWatermark("event_timestamp", "30 seconds")
         .groupBy(
             window(col("event_timestamp"), "2 minutes", "1 minute"),
@@ -281,7 +285,7 @@ def main():
     )
     uc10 = (
         placed.join(picked_up,
-            expr("order_id = pu_order_id AND picked_up_ts >= placed_ts AND picked_up_ts <= placed_ts + interval 2 hours"),
+            expr("order_id = pu_order_id AND picked_up_ts >= placed_ts AND picked_up_ts <= placed_ts + interval 15 minutes"),
             how="inner")
         .withColumn("processing_time_sec", col("picked_up_ts").cast("long") - col("placed_ts").cast("long"))
         .groupBy(window(col("placed_ts"), "1 minute"), col("zone_id"))
