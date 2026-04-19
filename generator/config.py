@@ -101,8 +101,14 @@ WEEKDAY_MULTIPLIER: float = 1.00
 # The weather is sampled for the whole city rather than by zone.
 # The weights do not need to add up to 1 exactly, because the weighted
 # selection function works with relative values.
+# Weather weights balanced for short demos: with the default 60/25/10/5 split,
+# HEAVY_RAIN and SNOW buckets end up with too few deliveries in a 2-3 minute
+# window, which makes their averages statistically noisy (sometimes *lower*
+# than CLEAR just because one fast delivery dominates the small sample).
+# A flatter distribution ensures every weather bucket has enough orders for
+# the average to be meaningful during a live demo.
 WEATHER_CONDITIONS = ["CLEAR", "RAIN", "HEAVY_RAIN", "SNOW"]
-WEATHER_WEIGHTS = [0.60, 0.25, 0.10, 0.05]
+WEATHER_WEIGHTS = [0.40, 0.25, 0.20, 0.15]
 
 # Bad weather tends to slow deliveries down.
 # These multipliers are used to increase the estimated delivery time
