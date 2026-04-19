@@ -16,10 +16,7 @@ from config import (
     zone_courier_weighted_choice, random_coords_in_zone,
 )
 
-# This dictionary stores rough speed ranges for each type of vehicle.
-# The values are not meant to be perfectly realistic in every situation,
-# but they give the simulation a believable range for how fast a courier
-# might move depending on what they are using.
+
 VEHICLE_SPEED: Dict[str, Dict] = {
     "BICYCLE":    {"min": 8,  "max": 25,  "avg": 15},
     "SCOOTER":    {"min": 15, "max": 45,  "avg": 28},
@@ -28,14 +25,11 @@ VEHICLE_SPEED: Dict[str, Dict] = {
     "FOOT":       {"min": 3,  "max": 8,   "avg": 5},
 }
 
-# These are the available vehicle types and the probability weights used
-# when assigning one to a courier.
-# For example, bicycles and scooters are more common than cars or walking couriers.
+
 VEHICLE_TYPES = list(VEHICLE_SPEED.keys())
 VEHICLE_WEIGHTS = [0.35, 0.30, 0.15, 0.12, 0.08]
 
-# This controls how often the courier sends a location update while moving.
-# In this simulation, a ping is created every 15 seconds.
+
 PING_INTERVAL_SECONDS = 15
 
 
@@ -179,25 +173,20 @@ class CourierSimulator:
         events.append(self._make_event(ts, "ONLINE_IDLE"))
 
         while ts < end_ts:
-            # This simulates the time the courier spends idle before receiving
-            # the next order assignment.
+            
             idle_wait = random.randint(30, 300)
             ts += idle_wait * 1000
 
             if ts >= end_ts:
                 break
 
-            # A new order is created for this delivery cycle.
             self.order_id = f"ord_{uuid.uuid4().hex[:12]}"
 
-            # A restaurant zone is selected, and both restaurant and customer
-            # coordinates are generated inside that zone.
-            # This keeps the trip local and reasonably believable.
+            
             restaurant_zone = zone_courier_weighted_choice()
             rest_lat, rest_lon = random_coords_in_zone(restaurant_zone)
             cust_lat, cust_lon = random_coords_in_zone(restaurant_zone)
 
-            # The courier is now travelling toward the restaurant.
             self.prev_status, self.status = self.status, "HEADING_TO_RESTAURANT"
             dist_to_rest_m = int(_haversine_km(self.lat, self.lon, rest_lat, rest_lon) * 1000)
             events.append(
@@ -208,8 +197,7 @@ class CourierSimulator:
                 )
             )
 
-            # Travel time is estimated from distance and sampled speed.
-            # A minimum of 60 seconds is enforced so trips do not become unrealistically short.
+            
             travel_time = max(60, int(dist_to_rest_m / (self._speed() * 1000 / 3600)))
             ping_ts = ts
 
@@ -236,9 +224,7 @@ class CourierSimulator:
                 )
                 events.append(ping_ev)
 
-                # Sometimes a duplicate event is deliberately added.
-                # This helps simulate messy streaming data that downstream systems
-                # may need to detect and handle properly.
+                
                 if random.random() < cfg.duplicate_rate:
                     dup = copy.deepcopy(ping_ev)
                     dup["event_id"] = str(uuid.uuid4())
@@ -249,15 +235,13 @@ class CourierSimulator:
             ts += travel_time * 1000
             self.lat, self.lon = rest_lat, rest_lon
 
-            # Once the courier reaches the restaurant, they wait for the order
-            # to be prepared and handed over.
+            
             self.prev_status, self.status = self.status, "WAITING_AT_RESTAURANT"
             events.append(self._make_event(ts, "WAITING_AT_RESTAURANT"))
             wait_time = random.randint(120, 900)
             ts += wait_time * 1000
 
-            # In some cases, the courier goes offline in the middle of the delivery flow.
-            # This creates an interruption and starts a new session later on.
+            
             if random.random() < cfg.courier_offline_mid_delivery_rate:
                 self.prev_status, self.status = self.status, "OFFLINE"
                 events.append(
@@ -275,21 +259,17 @@ class CourierSimulator:
                 events.append(self._make_event(ts, "ONLINE_IDLE"))
                 continue
 
-            # The courier has picked up the order and is now associated with
-            # the distance to the customer instead of the restaurant.
+            
             self.prev_status, self.status = self.status, "PICKED_UP"
             dist_to_cust_m = int(_haversine_km(self.lat, self.lon, cust_lat, cust_lon) * 1000)
             events.append(self._make_event(ts, "PICKED_UP", distance_to_customer=dist_to_cust_m))
 
-            # The courier is now on the way to the customer.
             self.prev_status, self.status = self.status, "EN_ROUTE_TO_CUSTOMER"
             events.append(self._make_event(ts, "EN_ROUTE_TO_CUSTOMER", distance_to_customer=dist_to_cust_m))
 
             delivery_time = max(60, int(dist_to_cust_m / (self._speed() * 1000 / 3600)))
             ping_ts = ts
 
-            # This anomaly creates a sudden location jump that would look suspicious
-            # in a real tracking system.
             if random.random() < 0.03:
                 jump_ev = self._make_event(
                     ping_ts + 5000,
@@ -300,8 +280,7 @@ class CourierSimulator:
                 jump_ev["longitude"] = round(self.lon + random.uniform(-0.05, 0.05), 6)
                 events.append(jump_ev)
 
-            # This anomaly marks a case where the timing would suggest an
-            # unrealistically high speed.
+            
             if random.random() < cfg.impossible_duration_rate:
                 fast_ev = self._make_event(
                     ping_ts + 8000,
@@ -337,19 +316,16 @@ class CourierSimulator:
             ts += delivery_time * 1000
             self.lat, self.lon = cust_lat, cust_lon
 
-            # The order is now complete.
             self.prev_status, self.status = self.status, "DELIVERED"
             self.deliveries_completed += 1
             events.append(self._make_event(ts, "DELIVERED"))
 
-            # After delivery, the courier returns to an idle online state
-            # and becomes ready for the next possible order.
+            
             self.order_id = None
             self.prev_status, self.status = "DELIVERED", "ONLINE_IDLE"
             events.append(self._make_event(ts + 5000, "ONLINE_IDLE"))
             ts += 5000
 
-        # The shift ends with the courier going offline.
         self.prev_status, self.status = self.status, "OFFLINE"
         events.append(self._make_event(ts, "OFFLINE"))
 
@@ -369,8 +345,7 @@ class CourierFleetGenerator:
         self.cfg = config
         random.seed(config.random_seed + 1)
 
-        # Courier IDs are created in a simple padded format so they are neat,
-        # consistent, and easy to read during testing.
+        
         self.courier_ids = [f"courier_{i:04d}" for i in range(config.num_couriers)]
 
     def generate(self, start_ts_ms: int) -> List[Dict]:
@@ -384,12 +359,11 @@ class CourierFleetGenerator:
 
         for cid in self.courier_ids:
             sim = CourierSimulator(cid, self.cfg)
-            # Scale shift jitter and minimum shift length with the total simulation
-            # duration so short demos work (simulation_duration_seconds can be < 3600).
+           
             sim_dur = self.cfg.simulation_duration_seconds
             jitter_max_ms = min(3600_000, sim_dur * 1000 // 2)
             shift_start = start_ts_ms + random.randint(0, jitter_max_ms)
-            min_shift = max(60, sim_dur // 4)   # at least 60s, otherwise a quarter of sim_dur
+            min_shift = max(60, sim_dur // 4)   
             max_shift = max(min_shift, sim_dur)
             shift_dur = random.randint(min_shift, max_shift)
             all_events.extend(sim.generate_shift(shift_start, shift_dur))
